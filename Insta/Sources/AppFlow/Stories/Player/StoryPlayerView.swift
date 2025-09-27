@@ -14,54 +14,55 @@ struct StoryPlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var didStart = false
     @State private var inputText: String = ""
+    let onPrevUser: (() -> Story?)?
+    let onNextUser: (() -> Story?)?
 
     var body: some View {
-        ZStack {
-            // Solid base to prevent white flash on appear
-            Color.black.ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                contentContainer
-                bottomBar
-                    .safeAreaPadding(.bottom)
-            }
-            .overlay(alignment: .top) {
-                topOverlay
-                    .safeAreaPadding(.top)
-            }
+        VStack(spacing: 0) {
+            contentContainer
+            bottomBar
+                .safeAreaPadding(.bottom)
         }
+        .overlay(alignment: .top) {
+            topOverlay
+                .safeAreaPadding(.top)
+        }
+        .background (Color.black.ignoresSafeArea())
         .onDisappear { viewModel.stop() }
         .preferredColorScheme(.dark)
+        .onAppear { viewModel.setDismiss { dismiss() } }
     }
 
     private var contentContainer: some View {
         ZStack {
             backgroundImage
             heartOverlayLayer
-            Rectangle()
-                .fill(Color.clear)
-                .contentShape(Rectangle())
-                .gesture(dragGesture)
-                .simultaneousGesture(longPressGesture)
-                .simultaneousGesture(doubleTapGesture)
             HStack(spacing: 0) {
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        viewModel.prevOrRestart()
+                        withTransaction(Transaction(animation: nil)) {
+                            viewModel.prevOrRestart()
+                        }
                     }
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        viewModel.next()
+                        withTransaction(Transaction(animation: nil)) {
+                            viewModel.next()
+                        }
                     }
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .center)
         .aspectRatio(9/16, contentMode: .fit)
+        .animation(nil, value: viewModel.currentItem.id)
+        .animation(nil, value: viewModel.currentStory.id)
+        .transaction { $0.animation = nil }
+        .highPriorityGesture(dragGesture)
+        .simultaneousGesture(longPressGesture)
+        .simultaneousGesture(doubleTapGesture)
     }
 
     private var backgroundImage: some View {
@@ -78,6 +79,7 @@ struct StoryPlayerView: View {
                 Color.black
             }
         }
+        .id(viewModel.currentItem.id)
     }
 
     private var topOverlay: some View {
@@ -94,8 +96,8 @@ struct StoryPlayerView: View {
             VStack(spacing: 12) {
                 ProgressBarView(count: viewModel.userStories.count, currentIndex: viewModel.currentIndex, progress: viewModel.progress)
                 HStack(spacing: 12) {
-                    StoryAvatarView(url: story.user.avatarURL, seen: false, displayedPlace: .storyDetail)
-                    Text(story.user.name).font(.headline).foregroundStyle(.white)
+                    StoryAvatarView(url: viewModel.currentStory.user.avatarURL, seen: false, displayedPlace: .storyDetail)
+                    Text(viewModel.currentStory.user.name).font(.headline).foregroundStyle(.white)
                     Text("•").foregroundStyle(.white.opacity(0.7))
                     Text("\(viewModel.currentIndex + 1)/\(viewModel.userStories.count)")
                         .font(.subheadline)
@@ -114,6 +116,7 @@ struct StoryPlayerView: View {
             }
             .padding(.top, 12)
         }
+        .animation(nil, value: viewModel.currentIndex)
     }
 
     private var heartOverlay: some View {
@@ -189,12 +192,30 @@ struct StoryPlayerView: View {
     private var dragGesture: some Gesture {
         DragGesture(minimumDistance: 20, coordinateSpace: .local)
             .onEnded { value in
-                if value.translation.height > 80 { dismiss() }
+                if value.translation.height > 80 {
+                    dismiss()
+                } else if value.translation.width < -60 {
+                    // swipe left → next user (or dismiss if none)
+                    if let next = onNextUser?() {
+                        didStart = false
+                        viewModel.load(story: next, startAt: 0)
+                    } else {
+                        dismiss()
+                    }
+                } else if value.translation.width > 60 {
+                    // swipe right → previous user (or dismiss if none)
+                    if let prev = onPrevUser?() {
+                        didStart = false
+                        viewModel.load(story: prev, startAt: 0)
+                    } else {
+                        dismiss()
+                    }
+                }
             }
     }
 
     private var longPressGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.15)
+        LongPressGesture(minimumDuration: 0.35)
             .onChanged { _ in viewModel.pause(true) }
             .onEnded { _ in viewModel.pause(false) }
     }
@@ -203,8 +224,15 @@ struct StoryPlayerView: View {
         TapGesture(count: 2).onEnded { viewModel.toggleLike(viewModel.currentItem.id) }
     }
 
-    init(story: Story, startAt: Int = 0) {
+    init(story: Story, startAt: Int = 0, onPrevUser: (() -> Story?)? = nil, onNextUser: (() -> Story?)? = nil) {
         self.story = story
-        _viewModel = StateObject(wrappedValue: StoryPlayerViewModel(items: story.items, startAt: startAt))
+        self.onPrevUser = onPrevUser
+        self.onNextUser = onNextUser
+        _viewModel = StateObject(wrappedValue: StoryPlayerViewModel(
+            story: story,
+            startAt: startAt,
+            onPrevUser: onPrevUser,
+            onNextUser: onNextUser
+        ))
     }
 }

@@ -60,7 +60,20 @@ struct HomeView<ViewModel: HomeViewModelProtocol>: View {
         }
         .task { await viewModel.loadInitial() }
         .fullScreenCover(item: $selectedStory) { story in
-            StoryPlayerView(story: story)
+            StoryPlayerView(
+                story: story,
+                startAt: 0,
+                onPrevUser: {
+                    let stories = viewModel.stories.map { $0.story }
+                    guard let idx = stories.firstIndex(where: { $0.id == story.id }) else { return nil }
+                    return idx > 0 ? stories[idx - 1] : nil
+                },
+                onNextUser: {
+                    let stories = viewModel.stories.map { $0.story }
+                    guard let idx = stories.firstIndex(where: { $0.id == story.id }) else { return nil }
+                    return idx < stories.count - 1 ? stories[idx + 1] : nil
+                }
+            )
         }
     }
 

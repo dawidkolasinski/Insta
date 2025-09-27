@@ -20,19 +20,51 @@ final class StoryPlayerViewModel: ObservableObject {
     @Published var showHeart: Bool = false
     @Published var heartPulse: HeartPulse? = nil
     @Published var progress: Double = 0 // 0..1
+    @Published var didExhaustUser: Bool = false
+    @Published var currentStory: Story
+
+    var currentItem: StoryItem { userStories[currentIndex] }
 
     private let tick: TimeInterval = 0.04
     private let itemDuration: TimeInterval = 5.0
+    private let persistence: PersistenceStore
+
+    private var bag = Set<AnyCancellable>()
     private var timer: Timer?
     private var hasStarted = false
 
-    private let persistence: PersistenceStore
-    var currentItem: StoryItem { userStories[currentIndex] }
+    // Callbacks provided by the view layer
+    private let nextUserProvider: (() -> Story?)?
+    private let prevUserProvider: (() -> Story?)?
+    private var dismissAction: (() -> Void)?
 
-    init(items: [StoryItem], startAt index: Int, persistence: PersistenceStore = PersistenceStore()) {
-        self.userStories = items
+    func load(story: Story, startAt index: Int = 0) {
+        stop()
+        currentStory = story
+        userStories = story.items
+        currentIndex = min(max(0, index), userStories.indices.last ?? 0)
+        progress = 0
+        hasStarted = false
+    }
+
+    init(story: Story,
+         startAt index: Int,
+         persistence: PersistenceStore = PersistenceStore(),
+         onPrevUser: (() -> Story?)? = nil,
+         onNextUser: (() -> Story?)? = nil,
+         onDismiss: (() -> Void)? = nil) {
+        self.currentStory = story
+        self.userStories = story.items
         self.currentIndex = index
         self.persistence = persistence
+        self.prevUserProvider = onPrevUser
+        self.nextUserProvider = onNextUser
+        self.dismissAction = onDismiss
+        bind()
+    }
+
+    func setDismiss(_ action: (() -> Void)?) {
+        dismissAction = action
     }
 
     func start() {
@@ -77,6 +109,8 @@ final class StoryPlayerViewModel: ObservableObject {
         if currentIndex < userStories.count - 1 {
             currentIndex += 1
             markSeen()
+        } else {
+            didExhaustUser = true
         }
     }
 
@@ -103,6 +137,23 @@ final class StoryPlayerViewModel: ObservableObject {
 
     func isLiked(_ id: String) -> Bool {
         return persistence.isLiked(id)
+    }
+
+    private func bind() {
+        $didExhaustUser
+            .removeDuplicates()
+            .filter { $0 }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                if let next = self.nextUserProvider?() {
+                    self.load(story: next, startAt: 0)
+                } else {
+                    self.dismissAction?()
+                }
+                self.didExhaustUser = false
+            }
+            .store(in: &bag)
     }
 
     private func markSeen() {

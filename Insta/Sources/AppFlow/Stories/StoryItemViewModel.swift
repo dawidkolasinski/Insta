@@ -16,7 +16,8 @@ final class StoryItemViewModel: ObservableObject {
     init(story: Story, persistence: PersistenceStore) {
         self.story = story
         self.persistence = persistence
-        isSeen = false // TODO: add logic to handle correct state on init
+        // A story is considered seen when all its items are marked seen in persistence
+        self.isSeen = story.items.allSatisfy { persistence.isSeen($0.id) }
     }
 
     func markDisplayed() {
@@ -24,6 +25,10 @@ final class StoryItemViewModel: ObservableObject {
             persistence.markSeen(item.id)
         }
         isSeen = true
+    }
+
+    func refreshSeen() {
+        isSeen = story.items.allSatisfy { persistence.isSeen($0.id) }
     }
 }
 
