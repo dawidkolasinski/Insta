@@ -11,7 +11,7 @@ import SwiftUI
 struct InstaApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            HomeView(viewModel: HomeViewModel())
         }
     }
 }
