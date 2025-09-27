@@ -44,6 +44,18 @@ struct StoryPlayerView: View {
                 .gesture(dragGesture)
                 .simultaneousGesture(longPressGesture)
                 .simultaneousGesture(doubleTapGesture)
+            HStack(spacing: 0) {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        viewModel.prevOrRestart()
+                    }
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        viewModel.next()
+                    }
+            }
         }
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .padding(.horizontal, 12)
@@ -69,22 +81,39 @@ struct StoryPlayerView: View {
     }
 
     private var topOverlay: some View {
-        VStack(spacing: 12) {
-            ProgressBarView(count: viewModel.userStories.count, currentIndex: viewModel.currentIndex, progress: viewModel.progress)
-            HStack(spacing: 12) {
-                StoryAvatarView(url: story.user.avatarURL, seen: false, displayedPlace: .storyDetail)
-                Text(story.user.name).font(.headline).foregroundStyle(.white)
-                Spacer()
-                Button { viewModel.toggleLike(viewModel.currentItem.id) } label: {
-                    Image(systemName: viewModel.isLiked(viewModel.currentItem.id) ? "heart.fill" : "heart")
-                        .foregroundStyle(.white)
-                        .font(.system(size: 20, weight: .semibold))
+        ZStack(alignment: .top) {
+            LinearGradient(
+                colors: [Color.black.opacity(0.65), Color.black.opacity(0.0)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 140)
+            .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
+
+            VStack(spacing: 12) {
+                ProgressBarView(count: viewModel.userStories.count, currentIndex: viewModel.currentIndex, progress: viewModel.progress)
+                HStack(spacing: 12) {
+                    StoryAvatarView(url: story.user.avatarURL, seen: false, displayedPlace: .storyDetail)
+                    Text(story.user.name).font(.headline).foregroundStyle(.white)
+                    Text("•").foregroundStyle(.white.opacity(0.7))
+                    Text("\(viewModel.currentIndex + 1)/\(viewModel.userStories.count)")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.9))
+                    Spacer()
+                    HStack(spacing: 16) {
+                        Button(action: { /* more options */ }) {
+                            Image(systemName: "ellipsis").font(.system(size: 18, weight: .semibold)).foregroundStyle(.white)
+                        }
+                        Button(action: { dismiss() }) {
+                            Image(systemName: "xmark").font(.system(size: 18, weight: .semibold)).foregroundStyle(.white)
+                        }
+                    }
                 }
-                .accessibilityLabel(viewModel.isLiked(viewModel.currentItem.id) ? "Unlike" : "Like")
+                .padding(.horizontal)
             }
-            .padding(.horizontal)
+            .padding(.top, 12)
         }
-        .padding(.top, 12)
     }
 
     private var heartOverlay: some View {
@@ -92,9 +121,24 @@ struct StoryPlayerView: View {
     }
 
     private var heartOverlayLayer: some View {
-        HeartBurstView(visible: Binding(get: { viewModel.showHeart }, set: { _ in }))
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            .allowsHitTesting(false)
+        Group {
+            switch viewModel.heartPulse {
+            case .like?:
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 120, weight: .regular))
+                    .foregroundColor(.red)
+                    .transition(.scale.combined(with: .opacity))
+            case .dislike?:
+                Image(systemName: "heart")
+                    .font(.system(size: 110, weight: .regular))
+                    .foregroundColor(.white)
+                    .transition(.scale.combined(with: .opacity))
+            case nil:
+                EmptyView()
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .allowsHitTesting(false)
     }
 
     private var bottomBar: some View {
@@ -126,7 +170,9 @@ struct StoryPlayerView: View {
             Button { viewModel.toggleLike(viewModel.currentItem.id) } label: {
                 Image(systemName: viewModel.isLiked(viewModel.currentItem.id) ? "heart.fill" : "heart")
                     .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(viewModel.isLiked(viewModel.currentItem.id) ? .red : .white)
             }
+            .accessibilityLabel(viewModel.isLiked(viewModel.currentItem.id) ? "Unlike" : "Like")
 
             Button {
 
@@ -144,8 +190,6 @@ struct StoryPlayerView: View {
         DragGesture(minimumDistance: 20, coordinateSpace: .local)
             .onEnded { value in
                 if value.translation.height > 80 { dismiss() }
-                else if value.translation.width < -60 { viewModel.next() }
-                else if value.translation.width > 60 { viewModel.prev() }
             }
     }
 

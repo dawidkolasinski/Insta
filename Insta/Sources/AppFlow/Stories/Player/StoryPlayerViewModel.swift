@@ -8,11 +8,17 @@
 import Combine
 import SwiftUI
 
+enum HeartPulse {
+    case like
+    case dislike
+}
+
 final class StoryPlayerViewModel: ObservableObject {
     @Published var userStories: [StoryItem]
     @Published var currentIndex: Int
     @Published var isPaused: Bool = false
     @Published var showHeart: Bool = false
+    @Published var heartPulse: HeartPulse? = nil
     @Published var progress: Double = 0 // 0..1
 
     private let tick: TimeInterval = 0.04
@@ -52,6 +58,20 @@ final class StoryPlayerViewModel: ObservableObject {
         isPaused = value
     }
 
+    func restart() {
+        progress = 0
+    }
+
+    func prevOrRestart() {
+        if currentIndex > 0 {
+            currentIndex -= 1
+            progress = 0
+            markSeen()
+        } else {
+            progress = 0
+        }
+    }
+
     func next() {
         progress = 0
         if currentIndex < userStories.count - 1 {
@@ -69,10 +89,15 @@ final class StoryPlayerViewModel: ObservableObject {
     }
 
     func toggleLike(_ id: String) {
+        let willLike = !isLiked(id)
+        // Trigger distinct overlay state first, then toggle persistence
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) {
+            heartPulse = willLike ? .like : .dislike
+        }
         persistence.toggleLike(id)
-        withAnimation(.spring()) { showHeart = true }
+        // Clear pulse after a short delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-            withAnimation(.easeOut) { self.showHeart = false }
+            withAnimation(.easeOut(duration: 0.25)) { self.heartPulse = nil }
         }
     }
 
