@@ -7,12 +7,7 @@
 
 import SwiftUI
 
-struct ScrollOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
+
 
 struct HomeView<ViewModel: HomeViewModelProtocol>: View {
     @StateObject private var viewModel: ViewModel
@@ -26,21 +21,27 @@ struct HomeView<ViewModel: HomeViewModelProtocol>: View {
                 .offset(y: navHidden ? -48 : 0)
                 .animation(.easeInOut(duration: 0.2), value: navHidden)
                 .zIndex(1)
+            if !viewModel.isOnline {
+                HStack(spacing: 8) {
+                    Image(systemName: "wifi.exclamationmark")
+                    Text("No internet connection - showing loaded data")
+                }
+                .font(.subheadline)
+                .padding(10)
+                .background(Color.red.opacity(0.9), in: Capsule())
+                .foregroundColor(.white)
+                .padding(.top, 56)
+                .transition(.opacity)
+                .zIndex(2)
+            }
             VStack(spacing: 0) {
                 ScrollView(.vertical) {
                     Color.clear.frame(height: 48)
-                        .background(
-                            GeometryReader { proxy in
-                                Color.clear.preference(
-                                    key: ScrollOffsetKey.self,
-                                    value: proxy.frame(in: .named("feedScroll")).minY
-                                )
-                            }
-                        )
                     StoriesListView(
                         layout: .horizontal,
                         items: viewModel.stories,
                         onSelect: { storyVM in
+                            guard viewModel.isOnline else { return }
                             selectedStory = storyVM.story
                         },
                         onLoadMore: { vm in
@@ -52,28 +53,25 @@ struct HomeView<ViewModel: HomeViewModelProtocol>: View {
                 }
             }
         }
-        .onPreferenceChange(ScrollOffsetKey.self) { newOffset in
-            let delta = newOffset - lastOffset
-            if delta < -1 { navHidden = true }
-            else if delta > 1 { navHidden = false }
-            lastOffset = newOffset
-        }
         .task { await viewModel.loadInitial() }
-        .fullScreenCover(item: $selectedStory) { story in
+        .fullScreenCover(item: $selectedStory, onDismiss: { viewModel.refreshSeen() }) { story in
             StoryPlayerView(
                 story: story,
                 startAt: 0,
-                onPrevUser: {
+                onPrevUser: { current in
                     let stories = viewModel.stories.map { $0.story }
-                    guard let idx = stories.firstIndex(where: { $0.id == story.id }) else { return nil }
+                    guard let idx = stories.firstIndex(where: { $0.id == current.id }) else { return nil }
                     return idx > 0 ? stories[idx - 1] : nil
                 },
-                onNextUser: {
+                onNextUser: { current in
                     let stories = viewModel.stories.map { $0.story }
-                    guard let idx = stories.firstIndex(where: { $0.id == story.id }) else { return nil }
+                    guard let idx = stories.firstIndex(where: { $0.id == current.id }) else { return nil }
                     return idx < stories.count - 1 ? stories[idx + 1] : nil
                 }
             )
+        }
+        .onChange(of: selectedStory == nil) { becameNil in
+            if becameNil { viewModel.refreshSeen() }
         }
     }
 

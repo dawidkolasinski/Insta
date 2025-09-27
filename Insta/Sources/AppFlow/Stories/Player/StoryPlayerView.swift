@@ -14,8 +14,8 @@ struct StoryPlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var didStart = false
     @State private var inputText: String = ""
-    let onPrevUser: (() -> Story?)?
-    let onNextUser: (() -> Story?)?
+    let onPrevUser: ((Story) -> Story?)?
+    let onNextUser: ((Story) -> Story?)?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,6 +41,7 @@ struct StoryPlayerView: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture {
+                        viewModel.pause(false)
                         withTransaction(Transaction(animation: nil)) {
                             viewModel.prevOrRestart()
                         }
@@ -48,6 +49,7 @@ struct StoryPlayerView: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture {
+                        viewModel.pause(false)
                         withTransaction(Transaction(animation: nil)) {
                             viewModel.next()
                         }
@@ -192,21 +194,24 @@ struct StoryPlayerView: View {
     private var dragGesture: some Gesture {
         DragGesture(minimumDistance: 20, coordinateSpace: .local)
             .onEnded { value in
+                viewModel.pause(false)
                 if value.translation.height > 80 {
                     dismiss()
                 } else if value.translation.width < -60 {
                     // swipe left → next user (or dismiss if none)
-                    if let next = onNextUser?() {
+                    if let next = onNextUser?(viewModel.currentStory) {
                         didStart = false
                         viewModel.load(story: next, startAt: 0)
+                        viewModel.start()
                     } else {
                         dismiss()
                     }
                 } else if value.translation.width > 60 {
                     // swipe right → previous user (or dismiss if none)
-                    if let prev = onPrevUser?() {
+                    if let prev = onPrevUser?(viewModel.currentStory) {
                         didStart = false
                         viewModel.load(story: prev, startAt: 0)
+                        viewModel.start()
                     } else {
                         dismiss()
                     }
@@ -224,7 +229,7 @@ struct StoryPlayerView: View {
         TapGesture(count: 2).onEnded { viewModel.toggleLike(viewModel.currentItem.id) }
     }
 
-    init(story: Story, startAt: Int = 0, onPrevUser: (() -> Story?)? = nil, onNextUser: (() -> Story?)? = nil) {
+    init(story: Story, startAt: Int = 0, onPrevUser: ((Story) -> Story?)? = nil, onNextUser: ((Story) -> Story?)? = nil) {
         self.story = story
         self.onPrevUser = onPrevUser
         self.onNextUser = onNextUser

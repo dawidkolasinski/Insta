@@ -34,8 +34,8 @@ final class StoryPlayerViewModel: ObservableObject {
     private var hasStarted = false
 
     // Callbacks provided by the view layer
-    private let nextUserProvider: (() -> Story?)?
-    private let prevUserProvider: (() -> Story?)?
+    private let nextUserProvider: ((Story) -> Story?)?
+    private let prevUserProvider: ((Story) -> Story?)?
     private var dismissAction: (() -> Void)?
 
     func load(story: Story, startAt index: Int = 0) {
@@ -45,13 +45,14 @@ final class StoryPlayerViewModel: ObservableObject {
         currentIndex = min(max(0, index), userStories.indices.last ?? 0)
         progress = 0
         hasStarted = false
+        isPaused = false
     }
 
     init(story: Story,
          startAt index: Int,
          persistence: PersistenceStore = PersistenceStore(),
-         onPrevUser: (() -> Story?)? = nil,
-         onNextUser: (() -> Story?)? = nil,
+         onPrevUser: ((Story) -> Story?)? = nil,
+         onNextUser: ((Story) -> Story?)? = nil,
          onDismiss: (() -> Void)? = nil) {
         self.currentStory = story
         self.userStories = story.items
@@ -74,12 +75,14 @@ final class StoryPlayerViewModel: ObservableObject {
             markSeen()
             hasStarted = true
         }
-        timer = Timer.scheduledTimer(withTimeInterval: tick, repeats: true) { [weak self] _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: tick, repeats: true) { [weak self] _ in
             guard let self else { return }
             guard !self.isPaused else { return }
             self.progress += self.tick / self.itemDuration
             if self.progress >= 1 { self.next() }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     func stop() {
@@ -95,6 +98,7 @@ final class StoryPlayerViewModel: ObservableObject {
     }
 
     func prevOrRestart() {
+        isPaused = false
         if currentIndex > 0 {
             currentIndex -= 1
             progress = 0
@@ -105,6 +109,7 @@ final class StoryPlayerViewModel: ObservableObject {
     }
 
     func next() {
+        isPaused = false
         progress = 0
         if currentIndex < userStories.count - 1 {
             currentIndex += 1
@@ -115,6 +120,7 @@ final class StoryPlayerViewModel: ObservableObject {
     }
 
     func prev() {
+        isPaused = false
         progress = 0
         if currentIndex > 0 {
             currentIndex -= 1
@@ -146,8 +152,9 @@ final class StoryPlayerViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self else { return }
-                if let next = self.nextUserProvider?() {
+                if let next = self.nextUserProvider?(self.currentStory) {
                     self.load(story: next, startAt: 0)
+                    self.start()
                 } else {
                     self.dismissAction?()
                 }
