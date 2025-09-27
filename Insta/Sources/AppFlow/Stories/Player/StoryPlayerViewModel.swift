@@ -18,21 +18,24 @@ final class StoryPlayerViewModel: ObservableObject {
     private let tick: TimeInterval = 0.04
     private let itemDuration: TimeInterval = 5.0
     private var timer: Timer?
+    private var hasStarted = false
 
     private let persistence: PersistenceStore
     var currentItem: StoryItem { userStories[currentIndex] }
 
-    init(items: [StoryItem], startAt index: Int, persistence: PersistenceStore) {
+    init(items: [StoryItem], startAt index: Int, persistence: PersistenceStore = PersistenceStore()) {
         self.userStories = items
         self.currentIndex = index
         self.persistence = persistence
-        markSeen()
-        start()
     }
 
     func start() {
         stop()
         progress = 0
+        if !hasStarted {
+            markSeen()
+            hasStarted = true
+        }
         timer = Timer.scheduledTimer(withTimeInterval: tick, repeats: true) { [weak self] _ in
             guard let self else { return }
             guard !self.isPaused else { return }
@@ -80,6 +83,6 @@ final class StoryPlayerViewModel: ObservableObject {
     private func markSeen() {
         persistence.markSeen(currentItem.id)
     }
-    
+
     deinit { stop() }
 }

@@ -17,7 +17,7 @@ struct StoryRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            StoryAvatarView(url: story.user.avatarURL, seen: isEntireStorySeen)
+            StoryAvatarView(url: story.user.avatarURL, seen: isEntireStorySeen, displayedPlace: .storyDetail)
             VStack(alignment: .leading, spacing: 4) {
                 Text(story.user.name).font(.headline)
                 Text("\(story.items.count) items")

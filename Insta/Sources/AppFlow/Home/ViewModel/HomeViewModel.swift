@@ -38,7 +38,6 @@ final class HomeViewModel: HomeViewModelProtocol {
         }
     }
 
-    // MARK: - Private
     private func loadMore() async {
         if let pageStories = try? await repo.loadPage(page) {
             let newVMs = pageStories.map { StoryItemViewModel(story: $0, persistence: persistenceObj) }

@@ -13,23 +13,30 @@ struct NavigationBarView: View {
     var onTrailingTap: () -> Void = {}
 
     var body: some View {
-        HStack(spacing: 16) {
-            Button(action: onLeadingTap) {
-                Image(systemName: "camera")
-                    .imageScale(.large)
-            }
-            Spacer()
+        ZStack {
             Text(title)
-                .font(.title2)
-                .fontWeight(.semibold)
-            Spacer()
-            Button(action: onTrailingTap) {
-                Image(systemName: "paperplane")
-                    .imageScale(.large)
+                .font(.system(size: 22, weight: .semibold, design: .rounded))
+                .italic()
+
+            HStack {
+                Button(action: onLeadingTap) {
+                    Image(systemName: "camera")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                }
+                Spacer()
+                Button(action: onTrailingTap) {
+                    Image(systemName: "paperplane")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                }
             }
         }
-        .padding(.horizontal)
-        .frame(height: 44)
-        .background(.thinMaterial)
+        .padding(.horizontal, 8)
+        .frame(height: 48)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .bottom) {
+            Divider().opacity(0.7)
+        }
     }
 }

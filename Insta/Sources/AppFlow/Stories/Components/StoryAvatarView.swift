@@ -10,6 +10,7 @@ import SwiftUI
 struct StoryAvatarView: View {
     let url: URL
     let seen: Bool
+    let displayedPlace: AvatarDisplayedPlace
 
     var body: some View {
         AsyncImage(url: url) { phase in
@@ -19,18 +20,53 @@ struct StoryAvatarView: View {
             default: ProgressView()
             }
         }
-        .equalWidthAndHeight(76)
+        .equalWidthAndHeight(displayedPlace.avatarWidth)
         .clipShape(Circle())
-        .padding(8)
+        .padding(displayedPlace.strokeWidth != nil ? 8 : 0)
         .overlay {
-            if seen {
-                Circle()
-                    .strokeBorder(Color.gray.opacity(0.2), lineWidth: 4)
-            } else {
-                Circle()
-                    .strokeBorder(AngularGradient(colors: [.pink, .orange, .yellow, .pink], center: .center), lineWidth: 4)
+            if let strokeWidth = displayedPlace.strokeWidth {
+                if seen {
+                    Circle()
+                        .strokeBorder(Color.gray.opacity(0.2), lineWidth: strokeWidth)
+                } else {
+                    Circle()
+                        .strokeBorder(
+                            AngularGradient(colors: [.pink, .orange, .yellow, .pink], center: .center),
+                            lineWidth: strokeWidth
+                        )
+                }
             }
         }
         .accessibilityLabel(seen ? "Story seen" : "Story unseen")
+    }
+}
+
+enum AvatarDisplayedPlace {
+    case storyFeed
+    case storyDetail
+    case feed
+}
+
+extension AvatarDisplayedPlace {
+    var avatarWidth: CGFloat {
+        switch self {
+        case .storyFeed:
+            76
+        case .storyDetail:
+            16
+        case .feed:
+            22
+        }
+    }
+
+    var strokeWidth: CGFloat? {
+        switch self {
+        case .storyFeed:
+            4
+        case .storyDetail:
+            nil
+        case .feed:
+            0
+        }
     }
 }

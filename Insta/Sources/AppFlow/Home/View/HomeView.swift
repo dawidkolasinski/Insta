@@ -7,26 +7,56 @@
 
 import SwiftUI
 
+struct ScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct HomeView<ViewModel: HomeViewModelProtocol>: View {
     @StateObject private var viewModel: ViewModel
     @State private var selectedStory: Story?
+    @State private var navHidden: Bool = false
+    @State private var lastOffset: CGFloat = 0
 
     var body: some View {
-        VStack (spacing: 0) {
-            NavigationBarView(title: "Home")
-            StoriesListView(
-                layout: .horizontal,
-                items: viewModel.stories,
-                onSelect: { storyVM in
-                    selectedStory = storyVM.story
-                },
-                onLoadMore: { vm in
-                    Task { await viewModel.loadMoreIfNeeded(current: vm) }
+        ZStack(alignment: .top) {
+            NavigationBarView(title: "DK's Insta")
+                .offset(y: navHidden ? -48 : 0)
+                .animation(.easeInOut(duration: 0.2), value: navHidden)
+                .zIndex(1)
+            VStack(spacing: 0) {
+                ScrollView(.vertical) {
+                    Color.clear.frame(height: 48)
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: ScrollOffsetKey.self,
+                                    value: proxy.frame(in: .named("feedScroll")).minY
+                                )
+                            }
+                        )
+                    StoriesListView(
+                        layout: .horizontal,
+                        items: viewModel.stories,
+                        onSelect: { storyVM in
+                            selectedStory = storyVM.story
+                        },
+                        onLoadMore: { vm in
+                            Task { await viewModel.loadMoreIfNeeded(current: vm) }
+                        }
+                    )
+                    .padding(.vertical, 8)
+                    FeedListView()
                 }
-            )
-            .padding(.vertical, 8)
-
-            FeedListView()
+            }
+        }
+        .onPreferenceChange(ScrollOffsetKey.self) { newOffset in
+            let delta = newOffset - lastOffset
+            if delta < -1 { navHidden = true }
+            else if delta > 1 { navHidden = false }
+            lastOffset = newOffset
         }
         .task { await viewModel.loadInitial() }
         .fullScreenCover(item: $selectedStory) { story in
