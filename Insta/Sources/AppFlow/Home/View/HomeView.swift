@@ -7,11 +7,16 @@
 
 import SwiftUI
 
+private struct StoriesFeedAdapter: StoriesFeedProtocol {
+    let stories: [any StoryProtocol]
+    let startIndex: Int
+}
 
 
 struct HomeView<ViewModel: HomeViewModelProtocol>: View {
     @StateObject private var viewModel: ViewModel
-    @State private var selectedStory: Story?
+    @State private var selectedIndex: Int? = nil
+    @State private var showStories: Bool = false
     @State private var navHidden: Bool = false
     @State private var lastOffset: CGFloat = 0
 
@@ -42,7 +47,10 @@ struct HomeView<ViewModel: HomeViewModelProtocol>: View {
                         items: viewModel.stories,
                         onSelect: { storyVM in
                             guard viewModel.isOnline else { return }
-                            selectedStory = storyVM.story
+                            if let idx = viewModel.stories.firstIndex(where: { $0.story.id == storyVM.story.id }) {
+                                selectedIndex = idx
+                                showStories = true
+                            }
                         },
                         onLoadMore: { vm in
                             Task { await viewModel.loadMoreIfNeeded(current: vm) }
@@ -54,24 +62,19 @@ struct HomeView<ViewModel: HomeViewModelProtocol>: View {
             }
         }
         .task { await viewModel.loadInitial() }
-        .fullScreenCover(item: $selectedStory, onDismiss: { viewModel.refreshSeen() }) { story in
-            StoryPlayerView(
-                story: story,
-                startAt: 0,
-                onPrevUser: { current in
-                    let stories = viewModel.stories.map { $0.story }
-                    guard let idx = stories.firstIndex(where: { $0.id == current.id }) else { return nil }
-                    return idx > 0 ? stories[idx - 1] : nil
-                },
-                onNextUser: { current in
-                    let stories = viewModel.stories.map { $0.story }
-                    guard let idx = stories.firstIndex(where: { $0.id == current.id }) else { return nil }
-                    return idx < stories.count - 1 ? stories[idx + 1] : nil
-                }
-            )
-        }
-        .onChange(of: selectedStory == nil) { becameNil in
-            if becameNil { viewModel.refreshSeen() }
+        .fullScreenCover(isPresented: $showStories, onDismiss: { viewModel.refreshSeen() }) {
+            let idx = selectedIndex ?? 0
+
+            let mapped: [any StoryProtocol] = viewModel.stories.map { s in
+                AnyStory(
+                    id: s.story.id,
+                    user: AnyStoryUser(name: s.story.user.name, avatarURL: s.story.user.avatarURL),
+                    items: s.story.items.map { AnyStoryItem(id: $0.id, imageURL: $0.imageURL) }
+                )
+            }
+            let safeIndex = min(max(0, idx), max(0, mapped.count - 1))
+            let feed = StoriesFeedAdapter(stories: mapped, startIndex: safeIndex)
+            StoriesContainerView(feed: feed)
         }
     }
 

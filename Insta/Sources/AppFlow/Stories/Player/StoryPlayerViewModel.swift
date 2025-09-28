@@ -2,170 +2,185 @@
 //  StoryPlayerViewModel.swift
 //  Insta
 //
-//  Created by Dawid Kolasinski on 27/09/2025.
+//  Minimal, protocol-oriented VMs with main-thread Timer and progress.
+//  No nested types inside classes. Universal & testable.
 //
 
 import Combine
-import SwiftUI
+import Foundation
 
-enum HeartPulse {
-    case like
-    case dislike
+// MARK: - Auto-advance configuration (file-scope)
+
+struct AutoAdvanceConfig: Equatable {
+    var enabled: Bool = true
+    var durationPerSlide: TimeInterval = 5.0
+    var tick: TimeInterval = 0.05
+    var loops: Bool = false
 }
 
-final class StoryPlayerViewModel: ObservableObject {
-    @Published var userStories: [StoryItem]
-    @Published var currentIndex: Int
-    @Published var isPaused: Bool = false
-    @Published var showHeart: Bool = false
-    @Published var heartPulse: HeartPulse? = nil
-    @Published var progress: Double = 0 // 0..1
-    @Published var didExhaustUser: Bool = false
-    @Published var currentStory: Story
+// MARK: - Feed (stories list) ViewModel
 
-    var currentItem: StoryItem { userStories[currentIndex] }
+final class StoriesContainerViewModel: ObservableObject {
+    private(set) var feed: any StoriesFeedProtocol
+    @Published private(set) var currentIndex: Int
 
-    private let tick: TimeInterval = 0.04
-    private let itemDuration: TimeInterval = 5.0
-    private let persistence: PersistenceStore
+    @Published private(set) var storyVM: StoryViewModel
+    @Published var shouldDismiss: Bool = false
+    private var childFinishCancellable: AnyCancellable?
 
-    private var bag = Set<AnyCancellable>()
-    private var timer: Timer?
-    private var hasStarted = false
+    var stories: [any StoryProtocol] { feed.stories }
+    var currentStory: any StoryProtocol { stories[safe: currentIndex] ?? feed.stories.first! }
 
-    // Callbacks provided by the view layer
-    private let nextUserProvider: ((Story) -> Story?)?
-    private let prevUserProvider: ((Story) -> Story?)?
-    private var dismissAction: (() -> Void)?
+    init(feed: any StoriesFeedProtocol) {
+        self.feed = feed
+        let start = max(0, min(feed.startIndex, max(0, feed.stories.count - 1)))
+        self.currentIndex = start
+        // Create child VM for current story
+        let vm = StoryViewModel(story: feed.stories[start])
+        self.storyVM = vm
+        self.shouldDismiss = false
+        bindChild()
+    }
 
-    func load(story: Story, startAt index: Int = 0) {
+    private func bindChild() {
+        childFinishCancellable?.cancel()
+        childFinishCancellable = storyVM.$didFinish
+            .removeDuplicates()
+            .sink { [weak self] finished in
+                guard let self = self, finished else { return }
+                self.handleChildFinished()
+            }
+    }
+
+    private func handleChildFinished() {
+        let nextIndex = currentIndex + 1
+        if nextIndex < stories.count {
+            currentIndex = nextIndex
+            swapChildForCurrent()
+        } else {
+            shouldDismiss = true
+        }
+    }
+
+    private func swapChildForCurrent() {
+        storyVM.stop()
+        storyVM = StoryViewModel(story: currentStory)
+        bindChild()
+    }
+
+    func goNextStory() {
+        if currentIndex + 1 < stories.count {
+            currentIndex += 1
+            swapChildForCurrent()
+        }
+    }
+    func goPrevStory() {
+        if currentIndex - 1 >= 0 {
+            currentIndex -= 1
+            swapChildForCurrent()
+        }
+    }
+}
+
+// MARK: - Single Story (slides/items) ViewModel
+
+final class StoryViewModel: ObservableObject {
+    // Config
+    private let auto: AutoAdvanceConfig
+
+    // State
+    @Published private(set) var story: any StoryProtocol
+    @Published private(set) var items: [any StoryItemProtocol]
+    @Published private(set) var index: Int = 0
+    @Published private(set) var isPaused: Bool = false
+    @Published private(set) var progress: Double = 0 // 0..1
+    @Published var didFinish: Bool = false
+
+    // Timer
+    private var timerRef: Timer?
+
+    var currentItem: any StoryItemProtocol { items[safe: index] ?? items.first! }
+
+    init(story: any StoryProtocol, auto: AutoAdvanceConfig = .init()) {
+        self.story = story
+        self.items = story.items
+        self.auto = auto
+        self.progress = 0
+        self.didFinish = false
+        self.start()
+    }
+
+    func load(story: any StoryProtocol, startAt: Int = 0) {
         stop()
-        currentStory = story
-        userStories = story.items
-        currentIndex = min(max(0, index), userStories.indices.last ?? 0)
-        progress = 0
-        hasStarted = false
-        isPaused = false
-    }
-
-    init(story: Story,
-         startAt index: Int,
-         persistence: PersistenceStore = PersistenceStore(),
-         onPrevUser: ((Story) -> Story?)? = nil,
-         onNextUser: ((Story) -> Story?)? = nil,
-         onDismiss: (() -> Void)? = nil) {
-        self.currentStory = story
-        self.userStories = story.items
-        self.currentIndex = index
-        self.persistence = persistence
-        self.prevUserProvider = onPrevUser
-        self.nextUserProvider = onNextUser
-        self.dismissAction = onDismiss
-        bind()
-    }
-
-    func setDismiss(_ action: (() -> Void)?) {
-        dismissAction = action
+        self.story = story
+        self.items = story.items
+        self.index = max(0, min(startAt, max(0, items.count - 1)))
+        self.isPaused = false
+        self.progress = 0
+        self.didFinish = false
     }
 
     func start() {
         stop()
         progress = 0
-        if !hasStarted {
-            markSeen()
-            hasStarted = true
+        guard auto.enabled, !items.isEmpty else { return }
+
+        let schedule = {
+            let localTimer = Timer.scheduledTimer(withTimeInterval: self.auto.tick, repeats: true) { [weak self] _ in
+                guard let self = self else { return }
+                guard !self.isPaused else { return }
+
+                self.progress += self.auto.tick / max(0.0001, self.auto.durationPerSlide)
+                if self.progress >= 1 {
+                    self.progress = 0
+                    if self.index < self.items.count - 1 {
+                        self.index += 1
+                    } else if self.auto.loops {
+                        self.index = 0
+                    } else {
+                        self.didFinish = true
+                        self.stop()
+                    }
+                }
+            }
+            RunLoop.main.add(localTimer, forMode: .common) // ensure main-thread run loop
+            self.timerRef = localTimer
         }
-        let timer = Timer.scheduledTimer(withTimeInterval: tick, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            guard !self.isPaused else { return }
-            self.progress += self.tick / self.itemDuration
-            if self.progress >= 1 { self.next() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
+
+        if Thread.isMainThread { schedule() } else { DispatchQueue.main.async(execute: schedule) }
     }
 
     func stop() {
-        timer?.invalidate(); timer = nil
+        timerRef?.invalidate()
+        timerRef = nil
     }
 
-    func pause(_ value: Bool) {
-        isPaused = value
-    }
-
-    func restart() {
-        progress = 0
-    }
-
-    func prevOrRestart() {
-        isPaused = false
-        if currentIndex > 0 {
-            currentIndex -= 1
-            progress = 0
-            markSeen()
-        } else {
-            progress = 0
-        }
-    }
+    func restart() { progress = 0 }
 
     func next() {
-        isPaused = false
         progress = 0
-        if currentIndex < userStories.count - 1 {
-            currentIndex += 1
-            markSeen()
+        if index < items.count - 1 {
+            index += 1
+        } else if auto.loops {
+            index = 0
         } else {
-            didExhaustUser = true
+            didFinish = true
         }
     }
 
     func prev() {
-        isPaused = false
         progress = 0
-        if currentIndex > 0 {
-            currentIndex -= 1
-            markSeen()
-        }
+        if index > 0 { index -= 1 }
+        else if auto.loops { index = max(0, items.count - 1) }
     }
 
-    func toggleLike(_ id: String) {
-        let willLike = !isLiked(id)
-        // Trigger distinct overlay state first, then toggle persistence
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) {
-            heartPulse = willLike ? .like : .dislike
-        }
-        persistence.toggleLike(id)
-        // Clear pulse after a short delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-            withAnimation(.easeOut(duration: 0.25)) { self.heartPulse = nil }
-        }
-    }
-
-    func isLiked(_ id: String) -> Bool {
-        return persistence.isLiked(id)
-    }
-
-    private func bind() {
-        $didExhaustUser
-            .removeDuplicates()
-            .filter { $0 }
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                guard let self else { return }
-                if let next = self.nextUserProvider?(self.currentStory) {
-                    self.load(story: next, startAt: 0)
-                    self.start()
-                } else {
-                    self.dismissAction?()
-                }
-                self.didExhaustUser = false
-            }
-            .store(in: &bag)
-    }
-
-    private func markSeen() {
-        persistence.markSeen(currentItem.id)
-    }
+    func pause(_ value: Bool) { isPaused = value }
 
     deinit { stop() }
+}
+
+// MARK: - Safe indexing helper
+
+private extension Array {
+    subscript(safe index: Index) -> Element? { indices.contains(index) ? self[index] : nil }
 }
