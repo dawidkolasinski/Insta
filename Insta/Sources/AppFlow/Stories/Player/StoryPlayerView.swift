@@ -354,7 +354,6 @@ struct ImageSlidesView: View {
     }
 }
 
-// MARK: - StoriesContainerView: feed container view
 
 struct StoriesContainerView: View {
     @Environment(\.dismiss) private var dismiss
@@ -438,7 +437,7 @@ struct StoryView: View {
         .animation(nil, value: (viewModel.currentItem as StoryItemProtocol).id)
         .animation(nil, value: (viewModel.story as StoryProtocol).id)
         .transaction { $0.animation = nil }
-        // Removed .highPriorityGesture(dragGesture)
+        .simultaneousGesture(longPressGesture)
     }
 
     private var backgroundImage: some View {
@@ -450,13 +449,13 @@ struct StoryView: View {
                     .resizable()
                     .scaledToFill()
                     .clipped()
+                    .onAppear { viewModel.onCurrentItemLoaded() }
             case .failure:
                 Color.black
             default:
                 Color.black
             }
         }
-        .id((viewModel.currentItem as StoryItemProtocol).id)
     }
 
     private var topOverlay: some View {
@@ -523,7 +522,11 @@ struct StoryView: View {
         return CGFloat(min(1, max(0, viewModel.progress)))
     }
 
-    // Removed dragGesture: let container handle horizontal/vertical swipes.
+    private var longPressGesture: some Gesture {
+        LongPressGesture(minimumDuration: 0.2)
+            .onChanged { _ in viewModel.pause(true) }
+            .onEnded { _ in viewModel.pause(false) }
+    }
 }
 
 // MARK: - Convenience initializer for your current app models

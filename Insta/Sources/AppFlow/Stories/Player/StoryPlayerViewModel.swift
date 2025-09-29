@@ -9,16 +9,12 @@
 import Combine
 import Foundation
 
-// MARK: - Auto-advance configuration (file-scope)
-
 struct AutoAdvanceConfig: Equatable {
     var enabled: Bool = true
     var durationPerSlide: TimeInterval = 5.0
     var tick: TimeInterval = 0.05
     var loops: Bool = false
 }
-
-// MARK: - Feed (stories list) ViewModel
 
 final class StoriesContainerViewModel: ObservableObject {
     private(set) var feed: any StoriesFeedProtocol
@@ -27,6 +23,7 @@ final class StoriesContainerViewModel: ObservableObject {
     @Published private(set) var storyVM: StoryViewModel
     @Published var shouldDismiss: Bool = false
     private var childFinishCancellable: AnyCancellable?
+    private var childPrevCancellable: AnyCancellable?
 
     var stories: [any StoryProtocol] { feed.stories }
     var currentStory: any StoryProtocol { stories[safe: currentIndex] ?? feed.stories.first! }
@@ -35,7 +32,6 @@ final class StoriesContainerViewModel: ObservableObject {
         self.feed = feed
         let start = max(0, min(feed.startIndex, max(0, feed.stories.count - 1)))
         self.currentIndex = start
-        // Create child VM for current story
         let vm = StoryViewModel(story: feed.stories[start])
         self.storyVM = vm
         self.shouldDismiss = false
@@ -44,11 +40,20 @@ final class StoriesContainerViewModel: ObservableObject {
 
     private func bindChild() {
         childFinishCancellable?.cancel()
+        childPrevCancellable?.cancel()
+
         childFinishCancellable = storyVM.$didFinish
             .removeDuplicates()
             .sink { [weak self] finished in
                 guard let self = self, finished else { return }
                 self.handleChildFinished()
+            }
+
+        childPrevCancellable = storyVM.$requestPrevStory
+            .removeDuplicates()
+            .sink { [weak self] requested in
+                guard let self = self, requested else { return }
+                self.handlePrevRequested()
             }
     }
 
@@ -58,7 +63,18 @@ final class StoriesContainerViewModel: ObservableObject {
             currentIndex = nextIndex
             swapChildForCurrent()
         } else {
+            storyVM.didFinish = false
             shouldDismiss = true
+        }
+    }
+
+    private func handlePrevRequested() {
+        if currentIndex - 1 >= 0 {
+            currentIndex -= 1
+            swapChildForCurrent()
+        } else {
+            // At the first story; ignore, but reset the flag so future taps emit again.
+            storyVM.requestPrevStory = false
         }
     }
 
@@ -94,7 +110,9 @@ final class StoryViewModel: ObservableObject {
     @Published private(set) var index: Int = 0
     @Published private(set) var isPaused: Bool = false
     @Published private(set) var progress: Double = 0 // 0..1
+    @Published private(set) var isCurrentItemLoaded: Bool = false
     @Published var didFinish: Bool = false
+    @Published var requestPrevStory: Bool = false
 
     // Timer
     private var timerRef: Timer?
@@ -107,7 +125,8 @@ final class StoryViewModel: ObservableObject {
         self.auto = auto
         self.progress = 0
         self.didFinish = false
-        self.start()
+        self.requestPrevStory = false
+        self.isCurrentItemLoaded = false
     }
 
     func load(story: any StoryProtocol, startAt: Int = 0) {
@@ -118,6 +137,8 @@ final class StoryViewModel: ObservableObject {
         self.isPaused = false
         self.progress = 0
         self.didFinish = false
+        self.requestPrevStory = false
+        self.isCurrentItemLoaded = false
     }
 
     func start() {
@@ -135,8 +156,12 @@ final class StoryViewModel: ObservableObject {
                     self.progress = 0
                     if self.index < self.items.count - 1 {
                         self.index += 1
+                        self.isCurrentItemLoaded = false
+                        self.stop()
                     } else if self.auto.loops {
                         self.index = 0
+                        self.isCurrentItemLoaded = false
+                        self.stop()
                     } else {
                         self.didFinish = true
                         self.stop()
@@ -161,17 +186,39 @@ final class StoryViewModel: ObservableObject {
         progress = 0
         if index < items.count - 1 {
             index += 1
+            isCurrentItemLoaded = false
+            stop()
         } else if auto.loops {
             index = 0
+            isCurrentItemLoaded = false
+            stop()
         } else {
             didFinish = true
+            stop()
         }
     }
 
     func prev() {
         progress = 0
-        if index > 0 { index -= 1 }
-        else if auto.loops { index = max(0, items.count - 1) }
+        if index > 0 {
+            index -= 1
+            isCurrentItemLoaded = false
+            stop()
+        } else if auto.loops {
+            index = max(0, items.count - 1)
+            isCurrentItemLoaded = false
+            stop()
+        } else {
+            // First slide and no looping → request container to move to previous story
+            // Do NOT stop the timer; keep current slide playing if there's no previous user.
+            requestPrevStory = true
+            // Intentionally not calling stop()
+        }
+    }
+
+    func onCurrentItemLoaded() {
+        isCurrentItemLoaded = true
+        if timerRef == nil { start() }
     }
 
     func pause(_ value: Bool) { isPaused = value }
