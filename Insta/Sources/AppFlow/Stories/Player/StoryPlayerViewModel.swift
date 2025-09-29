@@ -8,6 +8,7 @@
 
 import Combine
 import Foundation
+import SwiftUI
 
 struct AutoAdvanceConfig: Equatable {
     var enabled: Bool = true
@@ -19,22 +20,32 @@ struct AutoAdvanceConfig: Equatable {
 final class StoriesContainerViewModel: ObservableObject {
     private(set) var feed: any StoriesFeedProtocol
     @Published private(set) var currentIndex: Int
-
     @Published private(set) var storyVM: StoryViewModel
-    @Published var shouldDismiss: Bool = false
+    @Published private(set) var directionIsForward: Bool = true
+    var onDismiss: (() -> Void)?
+    var onResetDrag: (() -> Void)?
+
     private var childFinishCancellable: AnyCancellable?
     private var childPrevCancellable: AnyCancellable?
 
+    private var vms: [StoryViewModel] = []
+
     var stories: [any StoryProtocol] { feed.stories }
     var currentStory: any StoryProtocol { stories[safe: currentIndex] ?? feed.stories.first! }
+
+    var prevVM: StoryViewModel? { (currentIndex - 1) >= 0 ? vms[currentIndex - 1] : nil }
+    var nextVM: StoryViewModel? { (currentIndex + 1) < vms.count ? vms[currentIndex + 1] : nil }
 
     init(feed: any StoriesFeedProtocol) {
         self.feed = feed
         let start = max(0, min(feed.startIndex, max(0, feed.stories.count - 1)))
         self.currentIndex = start
-        let vm = StoryViewModel(story: feed.stories[start])
-        self.storyVM = vm
-        self.shouldDismiss = false
+
+        let created = feed.stories.map { StoryViewModel(story: $0) }
+        self.vms = created
+        self.storyVM = created[start]
+        for (index, vm) in created.enumerated() { vm.pause(index != start) }
+
         bindChild()
     }
 
@@ -44,6 +55,7 @@ final class StoriesContainerViewModel: ObservableObject {
 
         childFinishCancellable = storyVM.$didFinish
             .removeDuplicates()
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] finished in
                 guard let self = self, finished else { return }
                 self.handleChildFinished()
@@ -51,6 +63,7 @@ final class StoriesContainerViewModel: ObservableObject {
 
         childPrevCancellable = storyVM.$requestPrevStory
             .removeDuplicates()
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] requested in
                 guard let self = self, requested else { return }
                 self.handlePrevRequested()
@@ -58,39 +71,50 @@ final class StoriesContainerViewModel: ObservableObject {
     }
 
     private func handleChildFinished() {
+        directionIsForward = true
+        // clear the child flag early to avoid retriggers
+        storyVM.didFinish = false
+
         let nextIndex = currentIndex + 1
         if nextIndex < stories.count {
             currentIndex = nextIndex
             swapChildForCurrent()
+            // ask the view to reset interactive drag state immediately (no animations)
+            onResetDrag?()
         } else {
-            storyVM.didFinish = false
-            shouldDismiss = true
+            onDismiss?()
         }
     }
 
     private func handlePrevRequested() {
+        directionIsForward = false
+        storyVM.requestPrevStory = false
         if currentIndex - 1 >= 0 {
             currentIndex -= 1
             swapChildForCurrent()
-        } else {
-            // At the first story; ignore, but reset the flag so future taps emit again.
-            storyVM.requestPrevStory = false
+            onResetDrag?()
         }
     }
 
     private func swapChildForCurrent() {
-        storyVM.stop()
-        storyVM = StoryViewModel(story: currentStory)
+        for (index, vm) in vms.enumerated() { vm.pause(index != currentIndex) }
+        storyVM = vms[currentIndex]
+        // ensure fresh child state
+        storyVM.didFinish = false
+        storyVM.requestPrevStory = false
         bindChild()
     }
 
     func goNextStory() {
+        directionIsForward = true
         if currentIndex + 1 < stories.count {
             currentIndex += 1
             swapChildForCurrent()
         }
     }
+
     func goPrevStory() {
+        directionIsForward = false
         if currentIndex - 1 >= 0 {
             currentIndex -= 1
             swapChildForCurrent()
@@ -111,6 +135,7 @@ final class StoryViewModel: ObservableObject {
     @Published private(set) var isPaused: Bool = false
     @Published private(set) var progress: Double = 0 // 0..1
     @Published private(set) var isCurrentItemLoaded: Bool = false
+    @Published private(set) var imageCache: [String: Image] = [:]
     @Published var didFinish: Bool = false
     @Published var requestPrevStory: Bool = false
 
@@ -118,6 +143,9 @@ final class StoryViewModel: ObservableObject {
     private var timerRef: Timer?
 
     var currentItem: any StoryItemProtocol { items[safe: index] ?? items.first! }
+
+    func cachedImage(for itemID: String) -> Image? { imageCache[itemID] }
+    func store(image: Image, for itemID: String) { imageCache[itemID] = image }
 
     init(story: any StoryProtocol, auto: AutoAdvanceConfig = .init()) {
         self.story = story
@@ -149,7 +177,7 @@ final class StoryViewModel: ObservableObject {
         let schedule = {
             let localTimer = Timer.scheduledTimer(withTimeInterval: self.auto.tick, repeats: true) { [weak self] _ in
                 guard let self = self else { return }
-                guard !self.isPaused else { return }
+                if self.isPaused || !self.isCurrentItemLoaded { return }
 
                 self.progress += self.auto.tick / max(0.0001, self.auto.durationPerSlide)
                 if self.progress >= 1 {
@@ -157,18 +185,18 @@ final class StoryViewModel: ObservableObject {
                     if self.index < self.items.count - 1 {
                         self.index += 1
                         self.isCurrentItemLoaded = false
-                        self.stop()
+                        self.scheduleLoadFallback()
                     } else if self.auto.loops {
                         self.index = 0
                         self.isCurrentItemLoaded = false
-                        self.stop()
+                        self.scheduleLoadFallback()
                     } else {
                         self.didFinish = true
                         self.stop()
                     }
                 }
             }
-            RunLoop.main.add(localTimer, forMode: .common) // ensure main-thread run loop
+            RunLoop.main.add(localTimer, forMode: .common)
             self.timerRef = localTimer
         }
 
@@ -187,11 +215,11 @@ final class StoryViewModel: ObservableObject {
         if index < items.count - 1 {
             index += 1
             isCurrentItemLoaded = false
-            stop()
+            scheduleLoadFallback()
         } else if auto.loops {
             index = 0
             isCurrentItemLoaded = false
-            stop()
+            scheduleLoadFallback()
         } else {
             didFinish = true
             stop()
@@ -203,16 +231,13 @@ final class StoryViewModel: ObservableObject {
         if index > 0 {
             index -= 1
             isCurrentItemLoaded = false
-            stop()
+            scheduleLoadFallback()
         } else if auto.loops {
             index = max(0, items.count - 1)
             isCurrentItemLoaded = false
-            stop()
+            scheduleLoadFallback()
         } else {
-            // First slide and no looping → request container to move to previous story
-            // Do NOT stop the timer; keep current slide playing if there's no previous user.
             requestPrevStory = true
-            // Intentionally not calling stop()
         }
     }
 
@@ -223,7 +248,13 @@ final class StoryViewModel: ObservableObject {
 
     func pause(_ value: Bool) { isPaused = value }
 
-    deinit { stop() }
+    private func scheduleLoadFallback() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let strongSelf = self else { return }
+            guard strongSelf.timerRef != nil, strongSelf.isCurrentItemLoaded == false else { return }
+            strongSelf.onCurrentItemLoaded()
+        }
+    }
 }
 
 // MARK: - Safe indexing helper

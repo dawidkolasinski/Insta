@@ -9,28 +9,27 @@
 import Combine
 import SwiftUI
 
+// MARK: - Drag Axis Enum
+private enum DragAxis { case none, horizontal, vertical }
+
 // MARK: - Protocols (component-facing)
 
-/// Minimal item contract for the story player.
 protocol StoryItemProtocol {
     var id: String { get }
     var imageURL: URL? { get }
 }
 
-/// Minimal user contract for the story player.
 protocol StoryUserProtocol {
     var name: String { get }
     var avatarURL: URL? { get }
 }
 
-/// Minimal story contract for the story player.
 protocol StoryProtocol {
     var id: String { get }
     var user: StoryUserProtocol { get }
     var items: [any StoryItemProtocol] { get }
 }
 
-/// Stories feed protocol for container view model
 protocol StoriesFeedProtocol {
     var stories: [any StoryProtocol] { get }
     var startIndex: Int { get }
@@ -57,15 +56,71 @@ struct AnyStory: StoryProtocol {
     }
 }
 
-// MARK: - Generic Image Slides (no domain model required)
+// MARK: - Fancy presentation transition for StoriesContainerView
 
-/// A source for an image: either remote URL or asset name.
+struct OffsetScaleOpacityModifier: ViewModifier {
+    let offset: CGSize
+    let scale: CGFloat
+    let opacity: Double
+    let rotation: Double
+    let blur: CGFloat
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(scale)
+            .rotation3DEffect(.degrees(rotation), axis: (x: 1, y: 0, z: 0))
+            .blur(radius: blur)
+            .opacity(opacity)
+            .offset(offset)
+    }
+}
+
+extension AnyTransition {
+    static var storiesDeck: AnyTransition {
+        // Premium show: slight upward pop, subtle tilt toward viewer, and deblur-in
+        let insertion = AnyTransition.modifier(
+            active: OffsetScaleOpacityModifier(
+                offset: CGSize(width: 0, height: 20),
+                scale: 0.88,
+                opacity: 0.0,
+                rotation: 8,
+                blur: 6
+            ),
+            identity: OffsetScaleOpacityModifier(
+                offset: .zero,
+                scale: 1.0,
+                opacity: 1.0,
+                rotation: 0,
+                blur: 0
+            )
+        )
+        // Removal kept simple (scale + fade) — drag-dismiss handles the interactive path
+        let removal = AnyTransition.modifier(
+            active: OffsetScaleOpacityModifier(
+                offset: .zero,
+                scale: 0.9,
+                opacity: 0.0,
+                rotation: 0,
+                blur: 0
+            ),
+            identity: OffsetScaleOpacityModifier(
+                offset: .zero,
+                scale: 1.0,
+                opacity: 1.0,
+                rotation: 0,
+                blur: 0
+            )
+        )
+        return .asymmetric(insertion: insertion, removal: removal)
+    }
+}
+
+// MARK: - Generic Image Slides (optional reusable subcomponent)
+
 enum ImageSource: Equatable {
     case url(URL)
     case asset(String)
 }
 
-/// One slide representing a single image from a source.
 struct ImageSlide: Identifiable, Equatable {
     let id: String
     let source: ImageSource
@@ -74,7 +129,7 @@ struct ImageSlide: Identifiable, Equatable {
         self.source = source
     }
 }
-/// File-scope auto-advance config for ImageSlides
+
 struct ImageSlidesAutoConfig: Equatable {
     var enabled: Bool = true
     var durationPerSlide: TimeInterval = 5.0
@@ -82,11 +137,11 @@ struct ImageSlidesAutoConfig: Equatable {
     var loops: Bool = false
 }
 
-/// Minimal VM that navigates between image slides.
 final class ImageSlidesViewModel: ObservableObject {
     @Published private(set) var slides: [ImageSlide]
     @Published private(set) var index: Int
     @Published private(set) var progress: Double = 0
+    @Published private(set) var isPaused: Bool = false
 
     private let auto: ImageSlidesAutoConfig
     private var timerRef: Timer?
@@ -103,36 +158,29 @@ final class ImageSlidesViewModel: ObservableObject {
         stop()
         progress = 0
         guard auto.enabled, slides.count > 0 else { return }
-        let localTimer = Timer.scheduledTimer(withTimeInterval: auto.tick, repeats: true) { [weak self] _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: auto.tick, repeats: true) { [weak self] _ in
             guard let self = self else { return }
+            if self.isPaused { return }
             self.progress += self.auto.tick / max(0.0001, self.auto.durationPerSlide)
             if self.progress >= 1 {
                 self.progress = 0
-                if self.index < self.slides.count - 1 {
-                    self.index += 1
-                } else if self.auto.loops {
-                    self.index = 0
-                } else {
-                    self.stop()
-                }
+                if self.index < self.slides.count - 1 { self.index += 1 }
+                else if self.auto.loops { self.index = 0 }
+                else { self.stop() }
             }
         }
-        RunLoop.main.add(localTimer, forMode: .common)
-        self.timerRef = localTimer
+        RunLoop.main.add(timer, forMode: .common)
+        timerRef = timer
     }
 
     func stop() { timerRef?.invalidate(); timerRef = nil }
-
     func pause(_ value: Bool) { isPaused = value }
-
-    @Published private(set) var isPaused: Bool = false
 
     func next() {
         progress = 0
         if index < slides.count - 1 { index += 1 }
         else if auto.loops { index = 0 }
     }
-
     func prev() {
         progress = 0
         if index > 0 { index -= 1 }
@@ -142,15 +190,8 @@ final class ImageSlidesViewModel: ObservableObject {
     deinit { stop() }
 }
 
-/// Display style options for the image slides player.
-enum ImageSlidesStyle: Equatable {
-    /// Card-style inside safe area with aspect ratio and corner radius.
-    case card(aspectRatio: CGFloat = 9/16, cornerRadius: CGFloat = 16)
-    /// Fullscreen background (optionally ignoring safe areas).
-    case fullscreen(ignoreSafeAreas: Bool = true)
-}
+enum ImageSlidesStyle: Equatable { case card(aspectRatio: CGFloat = 9/16, cornerRadius: CGFloat = 16), fullscreen(ignoreSafeAreas: Bool = true) }
 
-/// Generic image slides player supporting taps/swipes and basic styles.
 struct ImageSlidesView: View {
     @ObservedObject private var viewModel: ImageSlidesViewModel
 
@@ -221,13 +262,11 @@ struct ImageSlidesView: View {
             if showsCounter { counterOverlay }
         }
         .background(Color.black.ignoresSafeArea())
-        .preferredColorScheme(.dark)
         .onAppear { viewModel.start() }
         .onDisappear { viewModel.stop() }
     }
 
-    @ViewBuilder
-    private var content: some View {
+    @ViewBuilder private var content: some View {
         let imageView = renderedImage(for: viewModel.current.source)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
@@ -257,21 +296,9 @@ struct ImageSlidesView: View {
 
     private var navTapZones: some View {
         Group {
-            if gestures.taps {
-                HStack(spacing: 0) {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            viewModel.prev()
-                        }
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            viewModel.next()
-                        }
-                }
-            } else {
-                Color.clear
+            HStack(spacing: 0) {
+                Color.clear.contentShape(Rectangle()).onTapGesture { viewModel.prev() }
+                Color.clear.contentShape(Rectangle()).onTapGesture { viewModel.next() }
             }
         }
     }
@@ -281,12 +308,12 @@ struct ImageSlidesView: View {
             .frame(height: 44)
             .overlay(
                 HStack(spacing: 4) {
-                    ForEach(viewModel.slides.indices, id: \.self) { i in
+                    ForEach(viewModel.slides.indices, id: \.self) { index in
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
                                 Capsule().fill(Color.white.opacity(0.25))
                                 Capsule().fill(Color.white)
-                                    .frame(width: geo.size.width * filledAmount(for: i))
+                                    .frame(width: geo.size.width * filledAmount(for: index))
                             }
                         }
                     }
@@ -297,9 +324,9 @@ struct ImageSlidesView: View {
             .allowsHitTesting(false)
     }
 
-    private func filledAmount(for i: Int) -> CGFloat {
-        if i < viewModel.index { return 1 }
-        if i > viewModel.index { return 0 }
+    private func filledAmount(for index: Int) -> CGFloat {
+        if index < viewModel.index { return 1 }
+        if index > viewModel.index { return 0 }
         return CGFloat(min(1, max(0, viewModel.progress)))
     }
 
@@ -321,27 +348,19 @@ struct ImageSlidesView: View {
 
     private var dragGesture: some Gesture {
         DragGesture(minimumDistance: 20, coordinateSpace: .local)
-            .onChanged { _ in
-                if gestures.longPressPause { viewModel.pause(true) }
-            }
+            .onChanged { _ in viewModel.pause(true) }
             .onEnded { value in
-                if gestures.longPressPause { viewModel.pause(false) }
-                if gestures.verticalDismiss, value.translation.height > 80 {
-                    onVerticalDismiss?()
-                    return
-                }
-                if gestures.swipes {
-                    if value.translation.width < -60 { viewModel.next() }
-                    else if value.translation.width > 60 { viewModel.prev() }
-                }
+                viewModel.pause(false)
+                if value.translation.height > 80 { onVerticalDismiss?(); return }
+                if value.translation.width < -60 { viewModel.next() }
+                else if value.translation.width > 60 { viewModel.prev() }
             }
     }
 
     @ViewBuilder
     private func renderedImage(for source: ImageSource) -> some View {
         switch source {
-        case .asset(let name):
-            Image(name).resizable().scaledToFill()
+        case .asset(let name): Image(name).resizable().scaledToFill()
         case .url(let url):
             AsyncImage(url: url) { phase in
                 switch phase {
@@ -354,47 +373,281 @@ struct ImageSlidesView: View {
     }
 }
 
+// MARK: - Stories container with interactive swipe previews + interactive vertical dismiss
 
 struct StoriesContainerView: View {
-    @Environment(\.dismiss) private var dismiss
-
     @StateObject private var containerVM: StoriesContainerViewModel
+    @State private var horizontalDrag: CGFloat = 0
+    @State private var containerWidth: CGFloat = 0
+    @State private var isInteractiveSwitch: Bool = false
 
-    init(feed: any StoriesFeedProtocol) {
+    // Vertical drag state
+    @State private var verticalDrag: CGFloat = 0
+    @State private var containerHeight: CGFloat = 0
+    @State private var containerOpacity: Double = 1
+    @State private var activeDragAxis: DragAxis = .none
+    // Hide neighbor previews while vertical snap-back animates
+    @State private var isVerticalSnappingBack: Bool = false
+
+    private let onDismiss: (() -> Void)?
+    @Binding private var dismissProgress: CGFloat
+    init(
+        feed: any StoriesFeedProtocol,
+        onDismiss: (() -> Void)? = nil,
+        dismissProgress: Binding<CGFloat> = .constant(0)
+    ) {
+        self.onDismiss = onDismiss
+        self._dismissProgress = dismissProgress
         _containerVM = StateObject(wrappedValue: StoriesContainerViewModel(feed: feed))
     }
 
     var body: some View {
-        ZStack {
-            if !containerVM.stories.isEmpty {
-                StoryView(viewModel: containerVM.storyVM)
-                    .id((containerVM.currentStory as StoryProtocol).id)
-                    .transition(.opacity)
-            } else {
-                Text("No stories available")
-                    .foregroundColor(.white)
-                    .font(.headline)
+        GeometryReader { geo in
+            let width = geo.size.width
+            let height = geo.size.height
+            let verticalProgress = min(1, max(0, verticalDrag / max(1, height)))
+            let easedVertical = CGFloat(pow(Double(verticalProgress), 0.25))
+            let showNeighbors = (activeDragAxis != .vertical && verticalDrag == 0 && !isVerticalSnappingBack)
+
+            Color.clear.onAppear { containerWidth = width; containerHeight = height }
+
+            ZStack {
+                if !containerVM.stories.isEmpty {
+                    // Previous preview (zIndex 0)
+                    if showNeighbors, let prev = containerVM.prevVM {
+                        StoryView(viewModel: prev, onDismiss: onDismiss)
+                            .id((prev.story as StoryProtocol).id)
+                            .offset(x: horizontalDrag - width)
+                            .allowsHitTesting(false)
+                            .zIndex(0)
+                    }
+                    // Next preview (zIndex 0)
+                    if showNeighbors, let next = containerVM.nextVM {
+                        StoryView(viewModel: next, onDismiss: onDismiss)
+                            .id((next.story as StoryProtocol).id)
+                            .offset(x: horizontalDrag + width)
+                            .allowsHitTesting(false)
+                            .zIndex(0)
+                    }
+                    // Current story (zIndex 1, always rendered last)
+                    StoryView(viewModel: containerVM.storyVM, onDismiss: onDismiss)
+                        .id((containerVM.currentStory as StoryProtocol).id)
+                        .offset(x: horizontalDrag)
+                        .zIndex(1)
+                } else {
+                    Text("No stories available")
+                        .foregroundColor(.white)
+                        .font(.headline)
+                }
+            }
+            // vertical drag: offset and scale under finger (card-like, fade, less travel, stronger scale)
+            .offset(y: verticalDrag)
+            .scaleEffect(1 - 0.50 * easedVertical)
+            .opacity(containerOpacity * max(0.0, 1 - 0.95 * Double(easedVertical)))
+        }
+        .background(Color.clear.ignoresSafeArea())
+        .gesture(dragGesture)
+        .onAppear {
+            containerVM.onDismiss = {
+                // Distance-based, snappy dismiss: travel remaining distance off-screen + overshoot
+                let baseOvershoot: CGFloat = 0.45
+                let targetY = max(containerHeight + containerHeight * baseOvershoot, 1)
+                let remaining = max(0, targetY - verticalDrag)
+                // speed ~1400 pt/s → duration in [0.14, 0.26]
+                let duration = min(max(Double(remaining / 1400), 0.14), 0.26)
+                withAnimation(.timingCurve(0.24, 0.92, 0.30, 1.0, duration: duration)) {
+                    verticalDrag = targetY
+                    containerOpacity = 0
+                    horizontalDrag = 0
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+                    onDismiss?()
+                    withTransaction(Transaction(animation: nil)) {
+                        verticalDrag = 0
+                        dismissProgress = 0
+                        containerOpacity = 1
+                        horizontalDrag = 0
+                    }
+                }
+            }
+            containerVM.onResetDrag = {
+                withTransaction(Transaction(animation: nil)) {
+                    horizontalDrag = 0
+                    verticalDrag = 0
+                    dismissProgress = 0
+                    isInteractiveSwitch = false
+                    activeDragAxis = .none
+                }
+                containerVM.storyVM.pause(false)
             }
         }
-        .background(Color.black.ignoresSafeArea())
-        .gesture(dragGesture)
-        .preferredColorScheme(.dark)
-        .animation(.easeInOut(duration: 0.2), value: containerVM.currentIndex)
-        .onChange(of: containerVM.shouldDismiss) { should in
-            if should { dismiss() }
+        .onChange(of: verticalDrag) { newValue in
+            let height = max(1, containerHeight)
+            dismissProgress = min(1, max(0, newValue / height))
         }
+        .onDisappear { containerVM.onDismiss = nil; containerVM.onResetDrag = nil }
     }
 
     private var dragGesture: some Gesture {
-        DragGesture(minimumDistance: 20, coordinateSpace: .local)
-            .onEnded { value in
-                if value.translation.height > 80 {
-                    dismiss()
-                } else if value.translation.width < -60 {
-                    containerVM.goNextStory()
-                } else if value.translation.width > 60 {
-                    containerVM.goPrevStory()
+        DragGesture(minimumDistance: 10, coordinateSpace: .local)
+            .onChanged { value in
+                let deltaX = value.translation.width
+                let deltaY = value.translation.height
+                let hysteresis: CGFloat = 12
+
+                // Decide axis once, with a bit of hysteresis to avoid flicker
+                if activeDragAxis == .none {
+                    if abs(deltaX) > abs(deltaY) + hysteresis { activeDragAxis = .horizontal }
+                    else if abs(deltaY) > abs(deltaX) + hysteresis { activeDragAxis = .vertical }
                 }
+
+                // Pause the story timer while user is interactively dragging
+                if activeDragAxis != .none {
+                    containerVM.storyVM.pause(true)
+                }
+
+                switch activeDragAxis {
+                case .horizontal:
+                    horizontalDrag = deltaX
+                    // lock out vertical while horizontal drag is active
+                    verticalDrag = 0
+                    dismissProgress = 0
+                case .vertical:
+                    verticalDrag = max(0, deltaY)
+                    // allow limited horizontal drift for natural feel (visual only; no switching on vertical axis)
+                    let drift = deltaX
+                    let maxDrift = containerWidth * 0.3
+                    horizontalDrag = min(max(drift, -maxDrift), maxDrift)
+                    // Ensure we clear the snapping flag during active drag
+                    isVerticalSnappingBack = false
+                case .none:
+                    // no-op until axis is decided
+                    break
+                }
+            }
+            .onEnded { value in
+                let endAxis = activeDragAxis
+                let deltaX = value.translation.width
+                let endVertical = max(0, value.translation.height)
+                let threshold: CGFloat = max(60, containerWidth * 0.18)
+
+                // Dismiss decision considers both distance and velocity (projected end)
+                if endAxis == .vertical {
+                    let projectedVertical = max(0, value.predictedEndTranslation.height)
+                    let distanceRatio = containerHeight > 0 ? (endVertical / containerHeight) : 0
+                    let projectedRatio = containerHeight > 0 ? (projectedVertical / containerHeight) : 0
+
+                    // Heuristics:
+                    // - classic: dragged >= 50% height
+                    // - or fast flick: projected end passes ~60% height
+                    // - or short but very quick: extra margin 160pt
+                    let fastFlickMargin: CGFloat = 160
+                    let shouldDismiss = (
+                        distanceRatio >= 0.5 ||
+                        projectedRatio >= 0.6 ||
+                        (projectedVertical - endVertical) >= fastFlickMargin
+                    )
+
+                    if shouldDismiss {
+                        // Momentum + distance-based: aim for predicted end, ensure off-screen + overshoot
+                        let projected = max(0, value.predictedEndTranslation.height)
+                        let extra = max(0, projected - endVertical)
+                        // classify flick speed (affects overshoot multiplier and speed)
+                        let speedCfg: (speed: CGFloat, overshoot: CGFloat)
+                        if extra >= 220 { // very fast flick
+                            speedCfg = (speed: 2000, overshoot: 0.60)
+                        } else if extra >= 80 { // quick flick
+                            speedCfg = (speed: 1600, overshoot: 0.52)
+                        } else { // normal
+                            speedCfg = (speed: 1400, overshoot: 0.45)
+                        }
+                        let baseTarget = max(projected, containerHeight)
+                        let targetY = max(baseTarget + containerHeight * speedCfg.overshoot, 1)
+                        let remaining = max(0, targetY - verticalDrag)
+                        // duration proportional to remaining travel at configured speed
+                        let duration = min(max(Double(remaining / speedCfg.speed), 0.12), 0.26)
+
+                        withAnimation(.timingCurve(0.24, 0.92, 0.30, 1.0, duration: duration)) {
+                            verticalDrag = targetY
+                            containerOpacity = 0
+                            horizontalDrag = 0
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+                            onDismiss?()
+                            withTransaction(Transaction(animation: nil)) {
+                                verticalDrag = 0
+                                dismissProgress = 0
+                                containerOpacity = 1
+                                horizontalDrag = 0
+                            }
+                        }
+                        activeDragAxis = .none
+                        return
+                    }
+
+                    // Not dismissed: snap back both axes
+                    isVerticalSnappingBack = true
+                    let snapDuration: Double = 0.22
+                    withAnimation(.interactiveSpring(response: snapDuration, dampingFraction: 0.92, blendDuration: 0.1)) {
+                        verticalDrag = 0
+                        horizontalDrag = 0
+                        dismissProgress = 0
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + snapDuration) {
+                        isVerticalSnappingBack = false
+                        containerVM.storyVM.pause(false)
+                    }
+                    activeDragAxis = .none
+                    return
+                }
+
+                // Horizontal switch, only if ended horizontal
+                if endAxis == .horizontal {
+                    if deltaX <= -threshold, containerVM.currentIndex + 1 < containerVM.stories.count {
+                        isInteractiveSwitch = true
+                        withAnimation(.interactiveSpring(response: 0.36, dampingFraction: 0.88, blendDuration: 0.1)) {
+                            horizontalDrag = -containerWidth
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                            containerVM.goNextStory()
+                            isInteractiveSwitch = false
+                            withTransaction(Transaction(animation: nil)) { horizontalDrag = 0 }
+                            verticalDrag = 0
+                            dismissProgress = 0
+                        }
+                        activeDragAxis = .none
+                        return
+                    } else if deltaX >= threshold, containerVM.currentIndex - 1 >= 0 {
+                        isInteractiveSwitch = true
+                        withAnimation(.interactiveSpring(response: 0.36, dampingFraction: 0.88, blendDuration: 0.1)) {
+                            horizontalDrag = containerWidth
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                            containerVM.goPrevStory()
+                            isInteractiveSwitch = false
+                            withTransaction(Transaction(animation: nil)) { horizontalDrag = 0 }
+                            verticalDrag = 0
+                            dismissProgress = 0
+                        }
+                        activeDragAxis = .none
+                        return
+                    }
+                }
+
+                // Unified reset and clear axis
+                let hadVertical = verticalDrag != 0
+                if hadVertical { isVerticalSnappingBack = true }
+                let snapBack: Double = 0.22
+                withAnimation(.spring(response: snapBack, dampingFraction: 0.9)) {
+                    horizontalDrag = 0
+                    verticalDrag = 0
+                    dismissProgress = 0
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + snapBack) {
+                    if hadVertical { isVerticalSnappingBack = false }
+                    containerVM.storyVM.pause(false)
+                }
+                activeDragAxis = .none
             }
     }
 }
@@ -403,14 +656,21 @@ struct StoriesContainerView: View {
 
 struct StoryView: View {
     @ObservedObject var viewModel: StoryViewModel
-    @Environment(\.dismiss) private var dismiss
+    let onDismiss: (() -> Void)?
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         VStack(spacing: 0) {
             contentContainer
         }
-        .overlay(alignment: .top) { topOverlay.safeAreaPadding(.top) }
-        .background(Color.black.ignoresSafeArea())
+        .background(Color.clear)
+        .onChange(of: scenePhase) { phase in
+            switch phase {
+            case .active: viewModel.pause(false)
+            case .inactive, .background: viewModel.pause(true)
+            @unknown default: break
+            }
+        }
     }
 
     private var contentContainer: some View {
@@ -431,6 +691,7 @@ struct StoryView: View {
                     }
             }
         }
+        .overlay(alignment: .top) { topOverlay }
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .frame(maxWidth: .infinity, alignment: .center)
         .aspectRatio(9/16, contentMode: .fit)
@@ -440,37 +701,48 @@ struct StoryView: View {
         .simultaneousGesture(longPressGesture)
     }
 
+    @ViewBuilder
     private var backgroundImage: some View {
-        let url = (viewModel.currentItem as StoryItemProtocol).imageURL
-        return AsyncImage(url: url) { phase in
-            switch phase {
-            case .success(let img):
-                img
-                    .resizable()
-                    .scaledToFill()
-                    .clipped()
-                    .onAppear { viewModel.onCurrentItemLoaded() }
-            case .failure:
-                Color.black
-            default:
-                Color.black
+        let item = (viewModel.currentItem as StoryItemProtocol)
+        let itemID = item.id
+        let url = item.imageURL
+
+        if let cached = viewModel.cachedImage(for: itemID) {
+            cached
+                .resizable()
+                .scaledToFill()
+                .clipped()
+                .onAppear { viewModel.onCurrentItemLoaded() }
+        } else {
+            AsyncImage(url: url, transaction: Transaction(animation: nil)) { phase in
+                switch phase {
+                case .success(let img):
+                    img
+                        .resizable()
+                        .scaledToFill()
+                        .clipped()
+                        .onAppear {
+                            viewModel.store(image: img, for: itemID)
+                            viewModel.onCurrentItemLoaded()
+                        }
+                case .failure:
+                    Color.black
+                        .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { viewModel.onCurrentItemLoaded() } }
+                default:
+                    Color.black
+                        .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { viewModel.onCurrentItemLoaded() } }
+                }
             }
         }
     }
 
     private var topOverlay: some View {
         ZStack(alignment: .top) {
-            LinearGradient(
-                colors: [Color.black.opacity(0.65), Color.black.opacity(0.0)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 140)
-            .ignoresSafeArea(edges: .top)
-            .allowsHitTesting(false)
+            LinearGradient(colors: [Color.black.opacity(0.65), Color.black.opacity(0.0)], startPoint: .top, endPoint: .bottom)
+                .frame(height: 140)
+                .allowsHitTesting(false)
 
             VStack(spacing: 8) {
-                // Progress bars
                 HStack(spacing: 4) {
                     ForEach(Array(viewModel.items.indices), id: \.self) { barIndex in
                         GeometryReader { geo in
@@ -484,8 +756,8 @@ struct StoryView: View {
                 }
                 .frame(height: 2)
                 .padding(.horizontal, 8)
+                .accessibilityLabel("\(viewModel.index + 1) z \(viewModel.items.count)")
 
-                // Header with X button
                 HStack(spacing: 12) {
                     if let avatar = (viewModel.story.user as StoryUserProtocol).avatarURL {
                         StoryAvatarView(url: avatar, seen: false, displayedPlace: .storyDetail)
@@ -502,13 +774,14 @@ struct StoryView: View {
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.9))
                     Spacer()
-                    Button(action: { dismiss() }) {
+                    Button(action: { onDismiss?() }) {
                         Image(systemName: "xmark")
                             .font(.system(size: 14, weight: .bold))
                             .foregroundColor(.white)
                             .padding(8)
                             .background(Color.black.opacity(0.55), in: Circle())
                     }
+                    .accessibilityLabel("Zamknij")
                 }
                 .padding(.horizontal)
             }
@@ -532,9 +805,7 @@ struct StoryView: View {
 // MARK: - Convenience initializer for your current app models
 
 extension StoriesContainerView {
-    /// Convenience init to keep your current `Story` model working without changes.
-    /// Wraps single story into a StoriesFeedProtocol inline struct.
-    init(story: Story) {
+    init(story: Story, onDismiss: (() -> Void)? = nil) {
         struct SingleStoryFeed: StoriesFeedProtocol {
             let stories: [any StoryProtocol]
             let startIndex: Int = 0
@@ -548,6 +819,6 @@ extension StoriesContainerView {
             }
         }
         let feed = SingleStoryFeed(story)
-        self.init(feed: feed)
+        self.init(feed: feed, onDismiss: onDismiss)
     }
 }
