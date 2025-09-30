@@ -1,7 +1,8 @@
 //
-//  StoryPlayerViewModel.swift
+//  StoriesContainerViewModel.swift
 //  Insta
 //
+//  Created by Dawid Kolasinski on 27/09/2025.
 //  Minimal, protocol-oriented VMs with main-thread Timer and progress.
 //  No nested types inside classes. Universal & testable.
 //
@@ -18,12 +19,16 @@ struct AutoAdvanceConfig: Equatable {
 }
 
 final class StoriesContainerViewModel: ObservableObject {
-    private(set) var feed: any StoriesFeedProtocol
+    private let feed: any StoriesFeedProtocol
+
     @Published private(set) var currentIndex: Int
     @Published private(set) var storyVM: StoryViewModel
     @Published private(set) var directionIsForward: Bool = true
-    var onDismiss: (() -> Void)?
-    var onResetDrag: (() -> Void)?
+
+    // Zdarzenia dla widoków (unikamy cykli przez closure)
+    let dismissRequested = PassthroughSubject<Void, Never>()
+    let resetDragRequested = PassthroughSubject<Void, Never>()
+    let nextStoryRequested = PassthroughSubject<Void, Never>()
 
     private var childFinishCancellable: AnyCancellable?
     private var childPrevCancellable: AnyCancellable?
@@ -31,10 +36,14 @@ final class StoriesContainerViewModel: ObservableObject {
     private var vms: [StoryViewModel] = []
 
     var stories: [any StoryProtocol] { feed.stories }
-    var currentStory: any StoryProtocol { stories[safe: currentIndex] ?? feed.stories.first! }
+    var currentStory: any StoryProtocol {
+        stories[safe: currentIndex]
+        ?? stories.first
+        ?? AnyStory(id: "empty", user: AnyStoryUser(name: "", avatarURL: nil), items: [])
+    }
 
-    var prevVM: StoryViewModel? { (currentIndex - 1) >= 0 ? vms[currentIndex - 1] : nil }
-    var nextVM: StoryViewModel? { (currentIndex + 1) < vms.count ? vms[currentIndex + 1] : nil }
+    var prevVM: StoryViewModel? { (currentIndex - 1) >= 0 ? vms[safe: currentIndex - 1] : nil }
+    var nextVM: StoryViewModel? { (currentIndex + 1) < vms.count ? vms[safe: currentIndex + 1] : nil }
 
     init(feed: any StoriesFeedProtocol) {
         self.feed = feed
@@ -43,8 +52,14 @@ final class StoriesContainerViewModel: ObservableObject {
 
         let created = feed.stories.map { StoryViewModel(story: $0) }
         self.vms = created
-        self.storyVM = created[start]
-        for (index, vm) in created.enumerated() { vm.pause(index != start) }
+
+        if let initial = created[safe: start] {
+            self.storyVM = initial
+            for (index, vm) in created.enumerated() { vm.pause(index != start) }
+        } else {
+            let empty = AnyStory(id: "empty", user: AnyStoryUser(name: "", avatarURL: nil), items: [])
+            self.storyVM = StoryViewModel(story: empty)
+        }
 
         bindChild()
     }
@@ -72,34 +87,41 @@ final class StoriesContainerViewModel: ObservableObject {
 
     private func handleChildFinished() {
         directionIsForward = true
-        storyVM.didFinish = false
+        storyVM.clearDidFinish()
 
         let nextIndex = currentIndex + 1
         if nextIndex < stories.count {
-            currentIndex = nextIndex
-            swapChildForCurrent()
-            onResetDrag?()
+            // Wyzwól animowany “switch” w widoku (jak po dragu)
+            DispatchQueue.main.async { [weak self] in
+                self?.nextStoryRequested.send()
+            }
+            // Drugi raz po krótkiej chwili – odporność na race condition
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.nextStoryRequested.send()
+            }
         } else {
-            onDismiss?()
+            dismissRequested.send()
         }
     }
 
     private func handlePrevRequested() {
         directionIsForward = false
-        storyVM.requestPrevStory = false
+        storyVM.clearRequestPrev()
         if currentIndex - 1 >= 0 {
             currentIndex -= 1
             swapChildForCurrent()
-            onResetDrag?()
+            resetDragRequested.send()
         }
     }
 
     private func swapChildForCurrent() {
         for (index, vm) in vms.enumerated() { vm.pause(index != currentIndex) }
-        storyVM = vms[currentIndex]
-        storyVM.didFinish = false
-        storyVM.requestPrevStory = false
-        bindChild()
+        if let newVM = vms[safe: currentIndex] {
+            storyVM = newVM
+            storyVM.clearDidFinish()
+            storyVM.clearRequestPrev()
+            bindChild()
+        }
     }
 
     func goNextStory() {
@@ -117,6 +139,11 @@ final class StoriesContainerViewModel: ObservableObject {
             swapChildForCurrent()
         }
     }
+
+    deinit {
+        childFinishCancellable?.cancel()
+        childPrevCancellable?.cancel()
+    }
 }
 
 final class StoryViewModel: ObservableObject {
@@ -130,12 +157,16 @@ final class StoryViewModel: ObservableObject {
     @Published private(set) var progress: Double = 0
     @Published private(set) var isCurrentItemLoaded: Bool = false
     @Published private(set) var imageCache: [String: Image] = [:]
-    @Published var didFinish: Bool = false
-    @Published var requestPrevStory: Bool = false
+    @Published private(set) var didFinish: Bool = false
+    @Published private(set) var requestPrevStory: Bool = false
 
     private var timerRef: Timer?
 
-    var currentItem: any StoryItemProtocol { items[safe: index] ?? items.first! }
+    var currentItem: any StoryItemProtocol {
+        items[safe: index]
+        ?? items.first
+        ?? AnyStoryItem(id: "empty", imageURL: nil)
+    }
 
     func cachedImage(for itemID: String) -> Image? { imageCache[itemID] }
     func store(image: Image, for itemID: String) { imageCache[itemID] = image }
@@ -149,6 +180,8 @@ final class StoryViewModel: ObservableObject {
         self.requestPrevStory = false
         self.isCurrentItemLoaded = false
     }
+
+    deinit { stop() }
 
     func load(story: any StoryProtocol, startAt: Int = 0) {
         stop()
@@ -184,7 +217,7 @@ final class StoryViewModel: ObservableObject {
                         self.isCurrentItemLoaded = false
                         self.scheduleLoadFallback()
                     } else {
-                        self.didFinish = true
+                        self.markDidFinish()
                         self.stop()
                     }
                 }
@@ -214,7 +247,7 @@ final class StoryViewModel: ObservableObject {
             isCurrentItemLoaded = false
             scheduleLoadFallback()
         } else {
-            didFinish = true
+            markDidFinish()
             stop()
         }
     }
@@ -230,7 +263,7 @@ final class StoryViewModel: ObservableObject {
             isCurrentItemLoaded = false
             scheduleLoadFallback()
         } else {
-            requestPrevStory = true
+            requestPrev()
         }
     }
 
@@ -244,6 +277,12 @@ final class StoryViewModel: ObservableObject {
     func hold(_ value: Bool) {
         if value { holdCount += 1 } else { holdCount = max(0, holdCount - 1) }
     }
+
+    // Event helpers (enkapsulują settery)
+    func markDidFinish() { didFinish = true }
+    func clearDidFinish() { didFinish = false }
+    func requestPrev() { requestPrevStory = true }
+    func clearRequestPrev() { requestPrevStory = false }
 
     private func scheduleLoadFallback() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in

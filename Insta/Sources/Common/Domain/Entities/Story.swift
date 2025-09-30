@@ -12,3 +12,4 @@ struct Story: Identifiable, Hashable, Codable {
     let user: User
     let items: [StoryItem]
 }
+

@@ -12,12 +12,13 @@ import Network
 final class HomeViewModel: HomeViewModelProtocol {
 
     @Published private(set) var stories: [StoryItemViewModel] = []
+    @Published private(set) var isOnline: Bool = true
+
     private var page: Int = 0
 
     private let repo: StoryRepository
     let persistenceObj: PersistenceStore
 
-    @Published var isOnline: Bool = true
     private let monitor = NWPathMonitor()
     private let monitorQueue = DispatchQueue(label: "NetworkMonitorQueue")
     private var bag = Set<AnyCancellable>()
@@ -49,6 +50,10 @@ final class HomeViewModel: HomeViewModelProtocol {
                 self?.refreshSeen()
             }
             .store(in: &bag)
+    }
+
+    deinit {
+        monitor.cancel()
     }
 
     func loadInitial() async {
@@ -90,3 +95,4 @@ final class HomeViewModel: HomeViewModelProtocol {
         }
     }
 }
+
