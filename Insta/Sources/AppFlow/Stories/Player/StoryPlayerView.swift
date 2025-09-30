@@ -9,10 +9,13 @@
 import Combine
 import SwiftUI
 
-// MARK: - Drag Axis Enum
-private enum DragAxis { case none, horizontal, vertical }
+struct StoriesComponentConfig: Equatable {
+    var style: ImageSlidesStyle = .card()
+    var gestures: ImageSlidesView.GesturesConfig = .allEnabled
+    var dimmerMaxOpacity: Double = 0.75
+}
 
-// MARK: - Protocols (component-facing)
+private enum DragAxis { case none, horizontal, vertical }
 
 protocol StoryItemProtocol {
     var id: String { get }
@@ -56,8 +59,6 @@ struct AnyStory: StoryProtocol {
     }
 }
 
-// MARK: - Fancy presentation transition for StoriesContainerView
-
 struct OffsetScaleOpacityModifier: ViewModifier {
     let offset: CGSize
     let scale: CGFloat
@@ -76,7 +77,6 @@ struct OffsetScaleOpacityModifier: ViewModifier {
 
 extension AnyTransition {
     static var storiesDeck: AnyTransition {
-        // Premium show: slight upward pop, subtle tilt toward viewer, and deblur-in
         let insertion = AnyTransition.modifier(
             active: OffsetScaleOpacityModifier(
                 offset: CGSize(width: 0, height: 20),
@@ -93,7 +93,6 @@ extension AnyTransition {
                 blur: 0
             )
         )
-        // Removal kept simple (scale + fade) — drag-dismiss handles the interactive path
         let removal = AnyTransition.modifier(
             active: OffsetScaleOpacityModifier(
                 offset: .zero,
@@ -113,8 +112,6 @@ extension AnyTransition {
         return .asymmetric(insertion: insertion, removal: removal)
     }
 }
-
-// MARK: - Generic Image Slides (optional reusable subcomponent)
 
 enum ImageSource: Equatable {
     case url(URL)
@@ -142,6 +139,7 @@ final class ImageSlidesViewModel: ObservableObject {
     @Published private(set) var index: Int
     @Published private(set) var progress: Double = 0
     @Published private(set) var isPaused: Bool = false
+    @Published private(set) var holdCount: Int = 0
 
     private let auto: ImageSlidesAutoConfig
     private var timerRef: Timer?
@@ -160,7 +158,7 @@ final class ImageSlidesViewModel: ObservableObject {
         guard auto.enabled, slides.count > 0 else { return }
         let timer = Timer.scheduledTimer(withTimeInterval: auto.tick, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            if self.isPaused { return }
+            if self.isPaused || self.holdCount > 0 { return }
             self.progress += self.auto.tick / max(0.0001, self.auto.durationPerSlide)
             if self.progress >= 1 {
                 self.progress = 0
@@ -175,6 +173,9 @@ final class ImageSlidesViewModel: ObservableObject {
 
     func stop() { timerRef?.invalidate(); timerRef = nil }
     func pause(_ value: Bool) { isPaused = value }
+    func hold(_ value: Bool) {
+        if value { holdCount += 1 } else { holdCount = max(0, holdCount - 1) }
+    }
 
     func next() {
         progress = 0
@@ -207,6 +208,9 @@ struct ImageSlidesView: View {
     private let gestures: GesturesConfig
     private let showsCounter: Bool
     private let onVerticalDismiss: (() -> Void)?
+
+    @State private var isHolding: Bool = false
+    @State private var holdWorkItem: DispatchWorkItem?
 
     init(
         slides: [ImageSlide],
@@ -291,15 +295,33 @@ struct ImageSlidesView: View {
             }
         }()
 
-        applied.highPriorityGesture(dragGesture)
+        applied
+            .simultaneousGesture(dragGesture)
     }
 
     private var navTapZones: some View {
         Group {
             HStack(spacing: 0) {
-                Color.clear.contentShape(Rectangle()).onTapGesture { viewModel.prev() }
-                Color.clear.contentShape(Rectangle()).onTapGesture { viewModel.next() }
+                Color.clear
+                    .contentShape(Rectangle())
+                    .highPriorityGesture(
+                        TapGesture().onEnded {
+                            guard gestures.taps, !isHolding else { return }
+                            viewModel.prev()
+                        }
+                    )
+                    .simultaneousGesture(holdGesture)
+                Color.clear
+                    .contentShape(Rectangle())
+                    .highPriorityGesture(
+                        TapGesture().onEnded {
+                            guard gestures.taps, !isHolding else { return }
+                            viewModel.next()
+                        }
+                    )
+                    .simultaneousGesture(holdGesture)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -357,6 +379,53 @@ struct ImageSlidesView: View {
             }
     }
 
+    private var holdGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .local)
+            .onChanged { value in
+                if holdWorkItem == nil { scheduleHold() }
+                let dx = value.translation.width
+                let dy = value.translation.height
+                if (dx * dx + dy * dy) > (24 * 24) {
+                    cancelHold()
+                }
+            }
+            .onEnded { _ in
+                finishHold()
+            }
+    }
+
+    private func scheduleHold() {
+        guard gestures.longPressPause else { return }
+        cancelHold()
+        let work = DispatchWorkItem {
+            isHolding = true
+            viewModel.hold(true)
+            viewModel.pause(true)
+        }
+        holdWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22, execute: work)
+    }
+
+    private func cancelHold() {
+        holdWorkItem?.cancel()
+        holdWorkItem = nil
+        if isHolding {
+            isHolding = false
+            viewModel.hold(false)
+            viewModel.pause(false)
+        }
+    }
+
+    private func finishHold() {
+        holdWorkItem?.cancel()
+        holdWorkItem = nil
+        if isHolding {
+            isHolding = false
+            viewModel.hold(false)
+            viewModel.pause(false)
+        }
+    }
+
     @ViewBuilder
     private func renderedImage(for source: ImageSource) -> some View {
         switch source {
@@ -373,31 +442,30 @@ struct ImageSlidesView: View {
     }
 }
 
-// MARK: - Stories container with interactive swipe previews + interactive vertical dismiss
-
 struct StoriesContainerView: View {
     @StateObject private var containerVM: StoriesContainerViewModel
     @State private var horizontalDrag: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
     @State private var isInteractiveSwitch: Bool = false
 
-    // Vertical drag state
     @State private var verticalDrag: CGFloat = 0
     @State private var containerHeight: CGFloat = 0
     @State private var containerOpacity: Double = 1
     @State private var activeDragAxis: DragAxis = .none
-    // Hide neighbor previews while vertical snap-back animates
     @State private var isVerticalSnappingBack: Bool = false
 
     private let onDismiss: (() -> Void)?
     @Binding private var dismissProgress: CGFloat
+    private let config: StoriesComponentConfig
     init(
         feed: any StoriesFeedProtocol,
         onDismiss: (() -> Void)? = nil,
-        dismissProgress: Binding<CGFloat> = .constant(0)
+        dismissProgress: Binding<CGFloat> = .constant(0),
+        config: StoriesComponentConfig = .init()
     ) {
         self.onDismiss = onDismiss
         self._dismissProgress = dismissProgress
+        self.config = config
         _containerVM = StateObject(wrappedValue: StoriesContainerViewModel(feed: feed))
     }
 
@@ -413,24 +481,21 @@ struct StoriesContainerView: View {
 
             ZStack {
                 if !containerVM.stories.isEmpty {
-                    // Previous preview (zIndex 0)
                     if showNeighbors, let prev = containerVM.prevVM {
-                        StoryView(viewModel: prev, onDismiss: onDismiss)
+                        StoryView(viewModel: prev, onDismiss: onDismiss, style: config.style)
                             .id((prev.story as StoryProtocol).id)
                             .offset(x: horizontalDrag - width)
                             .allowsHitTesting(false)
                             .zIndex(0)
                     }
-                    // Next preview (zIndex 0)
                     if showNeighbors, let next = containerVM.nextVM {
-                        StoryView(viewModel: next, onDismiss: onDismiss)
+                        StoryView(viewModel: next, onDismiss: onDismiss, style: config.style)
                             .id((next.story as StoryProtocol).id)
                             .offset(x: horizontalDrag + width)
                             .allowsHitTesting(false)
                             .zIndex(0)
                     }
-                    // Current story (zIndex 1, always rendered last)
-                    StoryView(viewModel: containerVM.storyVM, onDismiss: onDismiss)
+                    StoryView(viewModel: containerVM.storyVM, onDismiss: onDismiss, style: config.style)
                         .id((containerVM.currentStory as StoryProtocol).id)
                         .offset(x: horizontalDrag)
                         .zIndex(1)
@@ -440,20 +505,17 @@ struct StoriesContainerView: View {
                         .font(.headline)
                 }
             }
-            // vertical drag: offset and scale under finger (card-like, fade, less travel, stronger scale)
             .offset(y: verticalDrag)
             .scaleEffect(1 - 0.50 * easedVertical)
             .opacity(containerOpacity * max(0.0, 1 - 0.95 * Double(easedVertical)))
         }
         .background(Color.clear.ignoresSafeArea())
-        .gesture(dragGesture)
+        .simultaneousGesture(dragGesture)
         .onAppear {
             containerVM.onDismiss = {
-                // Distance-based, snappy dismiss: travel remaining distance off-screen + overshoot
                 let baseOvershoot: CGFloat = 0.45
                 let targetY = max(containerHeight + containerHeight * baseOvershoot, 1)
                 let remaining = max(0, targetY - verticalDrag)
-                // speed ~1400 pt/s → duration in [0.14, 0.26]
                 let duration = min(max(Double(remaining / 1400), 0.14), 0.26)
                 withAnimation(.timingCurve(0.24, 0.92, 0.30, 1.0, duration: duration)) {
                     verticalDrag = targetY
@@ -489,19 +551,17 @@ struct StoriesContainerView: View {
     }
 
     private var dragGesture: some Gesture {
-        DragGesture(minimumDistance: 10, coordinateSpace: .local)
+        DragGesture(minimumDistance: 16, coordinateSpace: .local)
             .onChanged { value in
                 let deltaX = value.translation.width
                 let deltaY = value.translation.height
                 let hysteresis: CGFloat = 12
 
-                // Decide axis once, with a bit of hysteresis to avoid flicker
                 if activeDragAxis == .none {
                     if abs(deltaX) > abs(deltaY) + hysteresis { activeDragAxis = .horizontal }
                     else if abs(deltaY) > abs(deltaX) + hysteresis { activeDragAxis = .vertical }
                 }
 
-                // Pause the story timer while user is interactively dragging
                 if activeDragAxis != .none {
                     containerVM.storyVM.pause(true)
                 }
@@ -509,19 +569,15 @@ struct StoriesContainerView: View {
                 switch activeDragAxis {
                 case .horizontal:
                     horizontalDrag = deltaX
-                    // lock out vertical while horizontal drag is active
                     verticalDrag = 0
                     dismissProgress = 0
                 case .vertical:
                     verticalDrag = max(0, deltaY)
-                    // allow limited horizontal drift for natural feel (visual only; no switching on vertical axis)
                     let drift = deltaX
                     let maxDrift = containerWidth * 0.3
                     horizontalDrag = min(max(drift, -maxDrift), maxDrift)
-                    // Ensure we clear the snapping flag during active drag
                     isVerticalSnappingBack = false
                 case .none:
-                    // no-op until axis is decided
                     break
                 }
             }
@@ -531,16 +587,11 @@ struct StoriesContainerView: View {
                 let endVertical = max(0, value.translation.height)
                 let threshold: CGFloat = max(60, containerWidth * 0.18)
 
-                // Dismiss decision considers both distance and velocity (projected end)
                 if endAxis == .vertical {
                     let projectedVertical = max(0, value.predictedEndTranslation.height)
                     let distanceRatio = containerHeight > 0 ? (endVertical / containerHeight) : 0
                     let projectedRatio = containerHeight > 0 ? (projectedVertical / containerHeight) : 0
 
-                    // Heuristics:
-                    // - classic: dragged >= 50% height
-                    // - or fast flick: projected end passes ~60% height
-                    // - or short but very quick: extra margin 160pt
                     let fastFlickMargin: CGFloat = 160
                     let shouldDismiss = (
                         distanceRatio >= 0.5 ||
@@ -549,22 +600,19 @@ struct StoriesContainerView: View {
                     )
 
                     if shouldDismiss {
-                        // Momentum + distance-based: aim for predicted end, ensure off-screen + overshoot
                         let projected = max(0, value.predictedEndTranslation.height)
                         let extra = max(0, projected - endVertical)
-                        // classify flick speed (affects overshoot multiplier and speed)
                         let speedCfg: (speed: CGFloat, overshoot: CGFloat)
-                        if extra >= 220 { // very fast flick
+                        if extra >= 220 {
                             speedCfg = (speed: 2000, overshoot: 0.60)
-                        } else if extra >= 80 { // quick flick
+                        } else if extra >= 80 {
                             speedCfg = (speed: 1600, overshoot: 0.52)
-                        } else { // normal
+                        } else {
                             speedCfg = (speed: 1400, overshoot: 0.45)
                         }
                         let baseTarget = max(projected, containerHeight)
                         let targetY = max(baseTarget + containerHeight * speedCfg.overshoot, 1)
                         let remaining = max(0, targetY - verticalDrag)
-                        // duration proportional to remaining travel at configured speed
                         let duration = min(max(Double(remaining / speedCfg.speed), 0.12), 0.26)
 
                         withAnimation(.timingCurve(0.24, 0.92, 0.30, 1.0, duration: duration)) {
@@ -585,7 +633,6 @@ struct StoriesContainerView: View {
                         return
                     }
 
-                    // Not dismissed: snap back both axes
                     isVerticalSnappingBack = true
                     let snapDuration: Double = 0.22
                     withAnimation(.interactiveSpring(response: snapDuration, dampingFraction: 0.92, blendDuration: 0.1)) {
@@ -601,7 +648,6 @@ struct StoriesContainerView: View {
                     return
                 }
 
-                // Horizontal switch, only if ended horizontal
                 if endAxis == .horizontal {
                     if deltaX <= -threshold, containerVM.currentIndex + 1 < containerVM.stories.count {
                         isInteractiveSwitch = true
@@ -634,7 +680,6 @@ struct StoriesContainerView: View {
                     }
                 }
 
-                // Unified reset and clear axis
                 let hadVertical = verticalDrag != 0
                 if hadVertical { isVerticalSnappingBack = true }
                 let snapBack: Double = 0.22
@@ -652,12 +697,14 @@ struct StoriesContainerView: View {
     }
 }
 
-// MARK: - StoryView: single story slides view
-
 struct StoryView: View {
     @ObservedObject var viewModel: StoryViewModel
     let onDismiss: (() -> Void)?
+    let style: ImageSlidesStyle
     @Environment(\.scenePhase) private var scenePhase
+
+    @State private var isHolding: Bool = false
+    @State private var holdWorkItem: DispatchWorkItem?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -679,26 +726,49 @@ struct StoryView: View {
             HStack(spacing: 0) {
                 Color.clear
                     .contentShape(Rectangle())
-                    .onTapGesture {
-                        viewModel.pause(false)
-                        withTransaction(Transaction(animation: nil)) { viewModel.prev() }
-                    }
+                    .highPriorityGesture(
+                        TapGesture().onEnded {
+                            guard !isHolding else { return }
+                            viewModel.pause(false)
+                            withTransaction(Transaction(animation: nil)) { viewModel.prev() }
+                        }
+                    )
+                    .simultaneousGesture(holdGesture)
                 Color.clear
                     .contentShape(Rectangle())
-                    .onTapGesture {
-                        viewModel.pause(false)
-                        withTransaction(Transaction(animation: nil)) { viewModel.next() }
-                    }
+                    .highPriorityGesture(
+                        TapGesture().onEnded {
+                            guard !isHolding else { return }
+                            viewModel.pause(false)
+                            withTransaction(Transaction(animation: nil)) { viewModel.next() }
+                        }
+                    )
+                    .simultaneousGesture(holdGesture)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .overlay(alignment: .top) { topOverlay }
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .frame(maxWidth: .infinity, alignment: .center)
-        .aspectRatio(9/16, contentMode: .fit)
+        .modifier(StyleApplier(style: style))
         .animation(nil, value: (viewModel.currentItem as StoryItemProtocol).id)
         .animation(nil, value: (viewModel.story as StoryProtocol).id)
         .transaction { $0.animation = nil }
-        .simultaneousGesture(longPressGesture)
+    }
+
+    private struct StyleApplier: ViewModifier {
+        let style: ImageSlidesStyle
+        func body(content: Content) -> some View {
+            switch style {
+            case let .card(aspect, radius):
+                content
+                    .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .aspectRatio(aspect, contentMode: .fit)
+            case let .fullscreen(ignore):
+                content
+                    .ignoresSafeArea(ignore ? .all : [])
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
     }
 
     @ViewBuilder
@@ -795,14 +865,94 @@ struct StoryView: View {
         return CGFloat(min(1, max(0, viewModel.progress)))
     }
 
-    private var longPressGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.2)
-            .onChanged { _ in viewModel.pause(true) }
-            .onEnded { _ in viewModel.pause(false) }
+    private var holdGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .local)
+            .onChanged { value in
+                if holdWorkItem == nil { scheduleHold() }
+                let dx = value.translation.width
+                let dy = value.translation.height
+                if (dx * dx + dy * dy) > (24 * 24) {
+                    cancelHold()
+                }
+            }
+            .onEnded { _ in
+                finishHold()
+            }
+    }
+
+    private func scheduleHold() {
+        cancelHold()
+        let work = DispatchWorkItem {
+            isHolding = true
+            viewModel.hold(true)
+            viewModel.pause(true)
+        }
+        holdWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22, execute: work)
+    }
+
+    private func cancelHold() {
+        holdWorkItem?.cancel()
+        holdWorkItem = nil
+        if isHolding {
+            isHolding = false
+            viewModel.hold(false)
+            viewModel.pause(false)
+        }
+    }
+
+    private func finishHold() {
+        holdWorkItem?.cancel()
+        holdWorkItem = nil
+        if isHolding {
+            isHolding = false
+            viewModel.hold(false)
+            viewModel.pause(false)
+        }
     }
 }
 
-// MARK: - Convenience initializer for your current app models
+struct StoriesPresenterModifier: ViewModifier {
+    @Binding var isPresented: Bool
+    var feed: any StoriesFeedProtocol
+    @Binding var dismissProgress: CGFloat
+    var config: StoriesComponentConfig
+    func body(content: Content) -> some View {
+        content.overlay(
+            ZStack {
+                if isPresented {
+                    Color.black.opacity(dismissProgress == 0 ? 1 : 0)
+                        .ignoresSafeArea()
+                        .zIndex(0)
+                    Color.black.opacity(max(0, min(1, config.dimmerMaxOpacity * (1 - sqrt(Double(dismissProgress))))))
+                        .ignoresSafeArea()
+                        .zIndex(1)
+                    StoriesContainerView(
+                        feed: feed,
+                        onDismiss: {
+                            withTransaction(Transaction(animation: nil)) { isPresented = false }
+                        },
+                        dismissProgress: $dismissProgress,
+                        config: config
+                    )
+                    .transition(.storiesDeck)
+                    .zIndex(2)
+                }
+            }
+        )
+    }
+}
+
+extension View {
+    func storiesPresenter(
+        isPresented: Binding<Bool>,
+        feed: any StoriesFeedProtocol,
+        dismissProgress: Binding<CGFloat> = .constant(0),
+        config: StoriesComponentConfig = .init()
+    ) -> some View {
+        modifier(StoriesPresenterModifier(isPresented: isPresented, feed: feed, dismissProgress: dismissProgress, config: config))
+    }
+}
 
 extension StoriesContainerView {
     init(story: Story, onDismiss: (() -> Void)? = nil) {

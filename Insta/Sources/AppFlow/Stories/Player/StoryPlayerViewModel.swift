@@ -72,14 +72,12 @@ final class StoriesContainerViewModel: ObservableObject {
 
     private func handleChildFinished() {
         directionIsForward = true
-        // clear the child flag early to avoid retriggers
         storyVM.didFinish = false
 
         let nextIndex = currentIndex + 1
         if nextIndex < stories.count {
             currentIndex = nextIndex
             swapChildForCurrent()
-            // ask the view to reset interactive drag state immediately (no animations)
             onResetDrag?()
         } else {
             onDismiss?()
@@ -99,7 +97,6 @@ final class StoriesContainerViewModel: ObservableObject {
     private func swapChildForCurrent() {
         for (index, vm) in vms.enumerated() { vm.pause(index != currentIndex) }
         storyVM = vms[currentIndex]
-        // ensure fresh child state
         storyVM.didFinish = false
         storyVM.requestPrevStory = false
         bindChild()
@@ -122,24 +119,20 @@ final class StoriesContainerViewModel: ObservableObject {
     }
 }
 
-// MARK: - Single Story (slides/items) ViewModel
-
 final class StoryViewModel: ObservableObject {
-    // Config
     private let auto: AutoAdvanceConfig
 
-    // State
     @Published private(set) var story: any StoryProtocol
     @Published private(set) var items: [any StoryItemProtocol]
     @Published private(set) var index: Int = 0
     @Published private(set) var isPaused: Bool = false
-    @Published private(set) var progress: Double = 0 // 0..1
+    @Published private(set) var holdCount: Int = 0
+    @Published private(set) var progress: Double = 0
     @Published private(set) var isCurrentItemLoaded: Bool = false
     @Published private(set) var imageCache: [String: Image] = [:]
     @Published var didFinish: Bool = false
     @Published var requestPrevStory: Bool = false
 
-    // Timer
     private var timerRef: Timer?
 
     var currentItem: any StoryItemProtocol { items[safe: index] ?? items.first! }
@@ -177,7 +170,7 @@ final class StoryViewModel: ObservableObject {
         let schedule = {
             let localTimer = Timer.scheduledTimer(withTimeInterval: self.auto.tick, repeats: true) { [weak self] _ in
                 guard let self = self else { return }
-                if self.isPaused || !self.isCurrentItemLoaded { return }
+                if self.isPaused || self.holdCount > 0 || !self.isCurrentItemLoaded { return }
 
                 self.progress += self.auto.tick / max(0.0001, self.auto.durationPerSlide)
                 if self.progress >= 1 {
@@ -248,6 +241,10 @@ final class StoryViewModel: ObservableObject {
 
     func pause(_ value: Bool) { isPaused = value }
 
+    func hold(_ value: Bool) {
+        if value { holdCount += 1 } else { holdCount = max(0, holdCount - 1) }
+    }
+
     private func scheduleLoadFallback() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
             guard let strongSelf = self else { return }
@@ -256,8 +253,6 @@ final class StoryViewModel: ObservableObject {
         }
     }
 }
-
-// MARK: - Safe indexing helper
 
 private extension Array {
     subscript(safe index: Index) -> Element? { indices.contains(index) ? self[index] : nil }

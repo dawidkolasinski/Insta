@@ -7,9 +7,23 @@
 
 import SwiftUI
 
-private struct StoriesFeedAdapter: StoriesFeedProtocol {
+struct StoriesFeedAdapter: StoriesFeedProtocol {
     let stories: [any StoryProtocol]
     let startIndex: Int
+}
+
+extension StoriesFeedAdapter {
+    init(viewModels: [StoryItemViewModel], startIndex: Int = 0) {
+        let mapped: [any StoryProtocol] = viewModels.map { vm in
+            AnyStory(
+                id: vm.story.id,
+                user: AnyStoryUser(name: vm.story.user.name, avatarURL: vm.story.user.avatarURL),
+                items: vm.story.items.map { AnyStoryItem(id: $0.id, imageURL: $0.imageURL) }
+            )
+        }
+        let safeIndex = min(max(0, startIndex), max(0, mapped.count - 1))
+        self.init(stories: mapped, startIndex: safeIndex)
+    }
 }
 
 struct HomeView<ViewModel: HomeViewModelProtocol>: View {
@@ -66,43 +80,11 @@ struct HomeView<ViewModel: HomeViewModelProtocol>: View {
             }
         }
         .task { await viewModel.loadInitial() }
-        .overlay(
-            ZStack {
-                if showStories {
-                    // Solid black base behind everything (fixes missing backdrop)
-                    Color.black.opacity(dismissProgress == 0 ? 1 : 0)
-                        .ignoresSafeArea()
-                        .zIndex(0)
-
-                    // Dimmer reacting to interactive dismiss, with darker-at-rest and faster-clearing curve
-                    Color.black.opacity(max(0, min(1, 0.75 * (1 - sqrt(Double(dismissProgress))))))
-                        .ignoresSafeArea()
-                        .zIndex(1)
-
-                    let index = selectedIndex ?? 0
-                    let mapped: [any StoryProtocol] = viewModel.stories.map { s in
-                        AnyStory(
-                            id: s.story.id,
-                            user: AnyStoryUser(name: s.story.user.name, avatarURL: s.story.user.avatarURL),
-                            items: s.story.items.map { AnyStoryItem(id: $0.id, imageURL: $0.imageURL) }
-                        )
-                    }
-                    let safeIndex = min(max(0, index), max(0, mapped.count - 1))
-                    let feed = StoriesFeedAdapter(stories: mapped, startIndex: safeIndex)
-
-                    StoriesContainerView(
-                        feed: feed,
-                        onDismiss: {
-                            // zamknij bez dodatkowej animacji usuwania (już dokończona pod palcem)
-                            withTransaction(Transaction(animation: nil)) { showStories = false }
-                            viewModel.refreshSeen()
-                        },
-                        dismissProgress: $dismissProgress
-                    )
-                    .transition(.storiesDeck) // only on show
-                    .zIndex(2)
-                }
-            }
+        .storiesPresenter(
+            isPresented: $showStories,
+            feed: StoriesFeedAdapter(viewModels: viewModel.stories, startIndex: selectedIndex ?? 0),
+            dismissProgress: $dismissProgress,
+            config: .init()
         )
     }
 
