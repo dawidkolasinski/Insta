@@ -12,6 +12,7 @@ struct StoriesPresenterModifier: ViewModifier {
     var feed: StoriesFeedProtocol
     @Binding var dismissProgress: CGFloat
     var config: StoriesComponentConfig
+
     func body(content: Content) -> some View {
         content.overlay(
             ZStack {
@@ -23,12 +24,11 @@ struct StoriesPresenterModifier: ViewModifier {
                         .ignoresSafeArea()
                         .zIndex(1)
                     StoriesContainerView(
-                        feed: feed,
+                        viewModel: StoriesContainerViewModel(feed: feed, config: config),
                         onDismiss: {
                             withTransaction(Transaction(animation: nil)) { isPresented = false }
                         },
-                        dismissProgress: $dismissProgress,
-                        config: config
+                        dismissProgress: $dismissProgress
                     )
                     .transition(.storiesDeck)
                     .zIndex(2)

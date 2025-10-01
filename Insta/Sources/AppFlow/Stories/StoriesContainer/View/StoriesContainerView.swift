@@ -8,10 +8,10 @@
 import SwiftUI
 import Combine
 
-struct StoriesContainerView: View {
+struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @StateObject private var containerViewModel: StoriesContainerViewModel
+    @StateObject private var containerViewModel: ViewModel
 
     @State private var horizontalDrag: CGFloat = 0
     @State private var verticalDrag: CGFloat = 0
@@ -30,15 +30,6 @@ struct StoriesContainerView: View {
     @Binding private var dismissProgress: CGFloat
 
     private let onDismiss: (() -> Void)?
-    private let config: StoriesComponentConfig
-
-    private var springAnimation: Animation {
-        .interactiveSpring(
-            response: config.physics.interactiveSwitchResponse,
-            dampingFraction: config.physics.interactiveSwitchDamping,
-            blendDuration: 0.1
-        )
-    }
 
     var body: some View {
         GeometryReader { geo in
@@ -54,27 +45,48 @@ struct StoriesContainerView: View {
                     containerWidth = width
                     containerHeight = height
                 }
-                .onChange(of: width) { newW in
-                    containerWidth = newW
+                .onChange(of: width) { newWidth in
+                    containerWidth = newWidth
                 }
-                .onChange(of: height) { containerHeight = $0 }
+                .onChange(of: height) { newHeight in
+                    containerHeight = newHeight
+                }
+
             ZStack {
                 if !containerViewModel.stories.isEmpty {
-                    if showNeighbors, let prev = containerViewModel.previousStoryViewModel {
-                        StoryView(viewModel: prev, onDismiss: onDismiss, style: config.style, holdConfig: config.hold, topOverlayHeight: config.topOverlayHeight)
-                            .offset(x: horizontalDrag - effectiveWidth)
-                            .allowsHitTesting(false)
-                            .zIndex(0)
+                    if showNeighbors, let previous = containerViewModel.previousStoryViewModel {
+                        StoryView(
+                            viewModel: previous,
+                            onDismiss: onDismiss,
+                            style: containerViewModel.config.style,
+                            holdConfig: containerViewModel.config.hold,
+                            topOverlayHeight: containerViewModel.config.topOverlayHeight
+                        )
+                        .offset(x: horizontalDrag - effectiveWidth)
+                        .allowsHitTesting(false)
+                        .zIndex(0)
                     }
                     if showNeighbors, let next = containerViewModel.nextStoryViewModel {
-                        StoryView(viewModel: next, onDismiss: onDismiss, style: config.style, holdConfig: config.hold, topOverlayHeight: config.topOverlayHeight)
-                            .offset(x: horizontalDrag + effectiveWidth)
-                            .allowsHitTesting(false)
-                            .zIndex(0)
+                        StoryView(
+                            viewModel: next,
+                            onDismiss: onDismiss,
+                            style: containerViewModel.config.style,
+                            holdConfig: containerViewModel.config.hold,
+                            topOverlayHeight: containerViewModel.config.topOverlayHeight
+                        )
+                        .offset(x: horizontalDrag + effectiveWidth)
+                        .allowsHitTesting(false)
+                        .zIndex(0)
                     }
-                    StoryView(viewModel: containerViewModel.currentStoryViewModel, onDismiss: onDismiss, style: config.style, holdConfig: config.hold, topOverlayHeight: config.topOverlayHeight)
-                        .offset(x: horizontalDrag)
-                        .zIndex(1)
+                    StoryView(
+                        viewModel: containerViewModel.currentStoryViewModel,
+                        onDismiss: onDismiss,
+                        style: containerViewModel.config.style,
+                        holdConfig: containerViewModel.config.hold,
+                        topOverlayHeight: containerViewModel.config.topOverlayHeight
+                    )
+                    .offset(x: horizontalDrag)
+                    .zIndex(1)
                 } else {
                     Text("No stories available")
                         .foregroundColor(.white)
@@ -91,18 +103,7 @@ struct StoriesContainerView: View {
         }
         .onReceive(containerViewModel.resetDragRequested) { _ in
             withTransaction(Transaction(animation: nil)) {
-                horizontalDrag = 0
-                verticalDrag = 0
-                dismissProgress = 0
-                isInteractiveSwitch = false
-                activeDragAxis = .none
-                isVerticalSnappingBack = false
-                verticalMode = .none
-                verticalBaseOffset = 0
-                verticalBaseDY = 0
-                horizontalBaseOffset = 0
-                horizontalBaseDX = 0
-                animWidth = 0
+                resetAllGestureStates()
             }
             containerViewModel.currentStoryViewModel.pause(false)
         }
@@ -118,15 +119,57 @@ struct StoriesContainerView: View {
     }
 
     init(
-        feed: StoriesFeedProtocol,
+        viewModel: @autoclosure @escaping () -> ViewModel,
         onDismiss: (() -> Void)? = nil,
-        dismissProgress: Binding<CGFloat> = .constant(0),
-        config: StoriesComponentConfig = .init()
+        dismissProgress: Binding<CGFloat> = .constant(0)
     ) {
         self.onDismiss = onDismiss
         self._dismissProgress = dismissProgress
-        self.config = config
-        _containerViewModel = StateObject(wrappedValue: StoriesContainerViewModel(feed: feed))
+        _containerViewModel = StateObject(wrappedValue: viewModel())
+    }
+
+    // MARK: - Gesture / Animation Helpers
+
+    private func resetDragAxisState() {
+        activeDragAxis = .none
+        verticalMode = .none
+        verticalBaseOffset = 0
+        verticalBaseDY = 0
+        horizontalBaseOffset = 0
+        horizontalBaseDX = 0
+    }
+
+    private func resetAllGestureStates() {
+        horizontalDrag = 0
+        verticalDrag = 0
+        dismissProgress = 0
+        isInteractiveSwitch = false
+        isVerticalSnappingBack = false
+        animWidth = 0
+        resetDragAxisState()
+    }
+
+    private func beginVerticalDragFromHorizontal(deltaX: CGFloat, deltaY: CGFloat) {
+        activeDragAxis = .vertical
+        verticalMode = .fromY
+        verticalBaseOffset = verticalEquivalent(fromHorizontal: deltaX)
+        verticalBaseDY = deltaY
+        horizontalBaseOffset = horizontalDrag
+        horizontalBaseDX = deltaX
+    }
+
+    private func beginVerticalDragFromVertical(deltaX: CGFloat) {
+        activeDragAxis = .vertical
+        verticalMode = .fromY
+        verticalBaseOffset = 0
+        verticalBaseDY = 0
+        horizontalBaseOffset = horizontalDrag
+        horizontalBaseDX = deltaX
+    }
+
+    private func beginHorizontalDrag() {
+        activeDragAxis = .horizontal
+        verticalMode = .none
     }
 
     private func performHorizontalSwitch(_ direction: StoriesSwitchDirection) {
@@ -134,20 +177,20 @@ struct StoriesContainerView: View {
 
         let computedWidth: CGFloat = {
             if containerWidth > 0 { return containerWidth }
-#if os(iOS) || os(tvOS) || os(visionOS)
+            #if os(iOS) || os(tvOS) || os(visionOS)
             return UIScreen.main.bounds.width
-#else
+            #else
             return 320
-#endif
+            #endif
         }()
         animWidth = computedWidth
-        let startIndex = containerViewModel.currentIndex
+        let startIndex = containerViewModel.currentStoryIndex
 
         switch direction {
         case .next:
-            guard containerViewModel.currentIndex + 1 < containerViewModel.stories.count else { animWidth = 0; return }
+            guard containerViewModel.currentStoryIndex + 1 < containerViewModel.stories.count else { animWidth = 0; return }
         case .prev:
-            guard containerViewModel.currentIndex - 1 >= 0 else { animWidth = 0; return }
+            guard containerViewModel.currentStoryIndex - 1 >= 0 else { animWidth = 0; return }
         }
 
         isInteractiveSwitch = true
@@ -161,12 +204,12 @@ struct StoriesContainerView: View {
             }
         }
 
-        let duration: Double = config.switchStyle.run(direction: direction, width: computedWidth) { newDrag in
+        let duration: Double = containerViewModel.config.switchStyle.run(direction: direction, width: computedWidth) { newDrag in
             horizontalDrag = newDrag
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
-            if containerViewModel.currentIndex == startIndex {
+            if containerViewModel.currentStoryIndex == startIndex {
                 switch direction {
                 case .next: containerViewModel.goToNextStory()
                 case .prev: containerViewModel.goToPreviousStory()
@@ -182,10 +225,11 @@ struct StoriesContainerView: View {
     }
 
     private func performDismissAnimation() {
-        let baseOvershoot: CGFloat = config.physics.verticalOvershootSlow
+        let baseOvershoot: CGFloat = containerViewModel.config.physics.verticalOvershootSlow
         let targetY = max(containerHeight + containerHeight * baseOvershoot, 1)
         let remaining = max(0, targetY - verticalDrag)
-        let duration = min(max(Double(remaining / config.physics.verticalSpeedSlow), 0.14), config.physics.dismissMaxDuration)
+        let safeSpeed = max(0.001, containerViewModel.config.physics.verticalSpeedSlow)
+        let duration = min(max(Double(remaining / safeSpeed), 0.14), containerViewModel.config.physics.dismissMaxDuration)
         withAnimation(.timingCurve(0.24, 0.92, 0.30, 1.0, duration: duration)) {
             verticalDrag = targetY
             containerOpacity = 0
@@ -194,10 +238,8 @@ struct StoriesContainerView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
             onDismiss?()
             withTransaction(Transaction(animation: nil)) {
-                verticalDrag = 0
-                dismissProgress = 0
+                resetAllGestureStates()
                 containerOpacity = 1
-                horizontalDrag = 0
             }
         }
     }
@@ -205,7 +247,7 @@ struct StoriesContainerView: View {
     private func verticalEquivalent(fromHorizontal dx: CGFloat) -> CGFloat {
         let w = max(1, containerWidth)
         let h = max(1, containerHeight)
-        let gain = max(0, config.physics.horizontalOverscrollToVerticalGain)
+        let gain = max(0, containerViewModel.config.physics.horizontalOverscrollToVerticalGain)
         return abs(dx) * (h / w) * gain
     }
 
@@ -214,40 +256,24 @@ struct StoriesContainerView: View {
             .onChanged { value in
                 let deltaX = value.translation.width
                 let deltaY = value.translation.height
-                let hysteresis: CGFloat = config.physics.horizontalHysteresis
+                let hysteresis: CGFloat = containerViewModel.config.physics.horizontalHysteresis
 
-                let isAtFirst = containerViewModel.currentIndex <= 0
-                let isAtLast = containerViewModel.currentIndex >= max(0, containerViewModel.stories.count - 1)
+                let isAtFirst = containerViewModel.currentStoryIndex <= 0
+                let isAtLast = containerViewModel.currentStoryIndex >= max(0, containerViewModel.stories.count - 1)
                 let overscrollMissingNeighbor = (deltaX > 0 && isAtFirst) || (deltaX < 0 && isAtLast)
 
                 if activeDragAxis == .none {
-                    let canH = config.containerGestures.horizontalSwipes
-                    let canV = config.containerGestures.verticalDismiss
+                    let canH = containerViewModel.config.containerGestures.horizontalSwipes
+                    let canV = containerViewModel.config.containerGestures.verticalDismiss
                     if overscrollMissingNeighbor, canV {
-                        activeDragAxis = .vertical
-                        verticalMode = .fromY
-                        verticalBaseOffset = verticalEquivalent(fromHorizontal: deltaX)
-                        verticalBaseDY = deltaY
-                        horizontalBaseOffset = horizontalDrag
-                        horizontalBaseDX = deltaX
+                        beginVerticalDragFromHorizontal(deltaX: deltaX, deltaY: deltaY)
                     } else if canH, abs(deltaX) > abs(deltaY) + hysteresis {
-                        activeDragAxis = .horizontal
-                        verticalMode = .none
+                        beginHorizontalDrag()
                     } else if canV, abs(deltaY) > abs(deltaX) + hysteresis {
-                        activeDragAxis = .vertical
-                        verticalMode = .fromY
-                        verticalBaseOffset = 0
-                        verticalBaseDY = 0
-                        horizontalBaseOffset = horizontalDrag
-                        horizontalBaseDX = deltaX
+                        beginVerticalDragFromVertical(deltaX: deltaX)
                     }
-                } else if activeDragAxis == .horizontal, overscrollMissingNeighbor, config.containerGestures.verticalDismiss {
-                    activeDragAxis = .vertical
-                    verticalMode = .fromY
-                    verticalBaseOffset = verticalEquivalent(fromHorizontal: deltaX)
-                    verticalBaseDY = deltaY
-                    horizontalBaseOffset = horizontalDrag
-                    horizontalBaseDX = deltaX
+                } else if activeDragAxis == .horizontal, overscrollMissingNeighbor, containerViewModel.config.containerGestures.verticalDismiss {
+                    beginVerticalDragFromHorizontal(deltaX: deltaX, deltaY: deltaY)
                 }
 
                 if activeDragAxis != .none {
@@ -256,7 +282,7 @@ struct StoriesContainerView: View {
 
                 switch activeDragAxis {
                 case .horizontal:
-                    guard config.containerGestures.horizontalSwipes else { return }
+                    guard containerViewModel.config.containerGestures.horizontalSwipes else { return }
                     if overscrollMissingNeighbor {
                         let rubber: CGFloat = 0.15
                         horizontalDrag = deltaX * rubber
@@ -268,10 +294,10 @@ struct StoriesContainerView: View {
                         dismissProgress = 0
                     }
                 case .vertical:
-                    guard config.containerGestures.verticalDismiss else { return }
+                    guard containerViewModel.config.containerGestures.verticalDismiss else { return }
                     let rawY = verticalBaseOffset + (deltaY - verticalBaseDY)
                     verticalDrag = max(0, rawY)
-                    let factor = max(0, config.physics.overscrollHorizontalDriftFactor)
+                    let factor = max(0, containerViewModel.config.physics.overscrollHorizontalDriftFactor)
                     let rawX = horizontalBaseOffset + (deltaX - horizontalBaseDX) * factor
                     let maxDrift = containerWidth * 0.3
                     horizontalDrag = min(max(rawX, -maxDrift), maxDrift)
@@ -285,14 +311,14 @@ struct StoriesContainerView: View {
                 let deltaX = value.translation.width
                 let endVerticalFromY = max(0, value.translation.height)
 
-                let isAtFirst = containerViewModel.currentIndex <= 0
-                let isAtLast = containerViewModel.currentIndex >= max(0, containerViewModel.stories.count - 1)
+                let isAtFirst = containerViewModel.currentStoryIndex <= 0
+                let isAtLast = containerViewModel.currentStoryIndex >= max(0, containerViewModel.stories.count - 1)
                 let overscrollMissingNeighbor = (deltaX > 0 && isAtFirst) || (deltaX < 0 && isAtLast)
 
-                let threshold: CGFloat = max(60, containerWidth * config.physics.horizontalSwipeThresholdFraction)
+                let threshold: CGFloat = max(60, containerWidth * containerViewModel.config.physics.horizontalSwipeThresholdFraction)
 
-                if (endAxis == .vertical && config.containerGestures.verticalDismiss) ||
-                    (overscrollMissingNeighbor && config.containerGestures.verticalDismiss) {
+                if (endAxis == .vertical && containerViewModel.config.containerGestures.verticalDismiss) ||
+                    (overscrollMissingNeighbor && containerViewModel.config.containerGestures.verticalDismiss) {
 
                     let endVertical = max(0, verticalBaseOffset + (endVerticalFromY - verticalBaseDY))
                     let projectedVertical = max(0, verticalBaseOffset + (value.predictedEndTranslation.height - verticalBaseDY))
@@ -300,10 +326,10 @@ struct StoriesContainerView: View {
                     let distanceRatio = containerHeight > 0 ? (endVertical / containerHeight) : 0
                     let projectedRatio = containerHeight > 0 ? (projectedVertical / containerHeight) : 0
 
-                    let fastFlickMargin: CGFloat = config.physics.verticalFastFlickMargin
+                    let fastFlickMargin: CGFloat = containerViewModel.config.physics.verticalFastFlickMargin
                     let shouldDismiss = (
-                        distanceRatio >= config.physics.verticalDismissDistanceRatio ||
-                        projectedRatio >= config.physics.verticalProjectedRatio ||
+                        distanceRatio >= containerViewModel.config.physics.verticalDismissDistanceRatio ||
+                        projectedRatio >= containerViewModel.config.physics.verticalProjectedRatio ||
                         (projectedVertical - endVertical) >= fastFlickMargin
                     )
 
@@ -311,16 +337,17 @@ struct StoriesContainerView: View {
                         let extra = max(0, projectedVertical - endVertical)
                         let speedCfg: (speed: CGFloat, overshoot: CGFloat)
                         if extra >= 220 {
-                            speedCfg = (speed: config.physics.verticalSpeedFast, overshoot: config.physics.verticalOvershootFast)
+                            speedCfg = (speed: containerViewModel.config.physics.verticalSpeedFast, overshoot: containerViewModel.config.physics.verticalOvershootFast)
                         } else if extra >= 80 {
-                            speedCfg = (speed: config.physics.verticalSpeedMedium, overshoot: config.physics.verticalOvershootMedium)
+                            speedCfg = (speed: containerViewModel.config.physics.verticalSpeedMedium, overshoot: containerViewModel.config.physics.verticalOvershootMedium)
                         } else {
-                            speedCfg = (speed: config.physics.verticalSpeedSlow, overshoot: config.physics.verticalOvershootSlow)
+                            speedCfg = (speed: containerViewModel.config.physics.verticalSpeedSlow, overshoot: containerViewModel.config.physics.verticalOvershootSlow)
                         }
                         let baseTarget = max(projectedVertical, containerHeight)
                         let targetY = max(baseTarget + containerHeight * speedCfg.overshoot, 1)
                         let remaining = max(0, targetY - verticalDrag)
-                        let duration = min(max(Double(remaining / speedCfg.speed), config.physics.dismissMinDuration), config.physics.dismissMaxDuration)
+                        let safeSpeed = max(0.001, speedCfg.speed)
+                        let duration = min(max(Double(remaining / safeSpeed), containerViewModel.config.physics.dismissMinDuration), containerViewModel.config.physics.dismissMaxDuration)
 
                         withAnimation(.timingCurve(0.24, 0.92, 0.30, 1.0, duration: duration)) {
                             verticalDrag = targetY
@@ -330,23 +357,16 @@ struct StoriesContainerView: View {
                         DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
                             onDismiss?()
                             withTransaction(Transaction(animation: nil)) {
-                                verticalDrag = 0
-                                dismissProgress = 0
+                                resetAllGestureStates()
                                 containerOpacity = 1
-                                horizontalDrag = 0
                             }
                         }
-                        activeDragAxis = .none
-                        verticalMode = .none
-                        verticalBaseOffset = 0
-                        verticalBaseDY = 0
-                        horizontalBaseOffset = 0
-                        horizontalBaseDX = 0
+                        resetDragAxisState()
                         return
                     }
 
                     isVerticalSnappingBack = true
-                    let snapDuration: Double = config.physics.snapBackDuration
+                    let snapDuration: Double = containerViewModel.config.physics.snapBackDuration
                     withAnimation(.interactiveSpring(response: snapDuration, dampingFraction: 0.92, blendDuration: 0.1)) {
                         verticalDrag = 0
                         horizontalDrag = 0
@@ -356,40 +376,25 @@ struct StoriesContainerView: View {
                         isVerticalSnappingBack = false
                         containerViewModel.currentStoryViewModel.pause(false)
                     }
-                    activeDragAxis = .none
-                    verticalMode = .none
-                    verticalBaseOffset = 0
-                    verticalBaseDY = 0
-                    horizontalBaseOffset = 0
-                    horizontalBaseDX = 0
+                    resetDragAxisState()
                     return
                 }
 
-                if endAxis == .horizontal, config.containerGestures.horizontalSwipes {
-                    if deltaX <= -threshold, containerViewModel.currentIndex + 1 < containerViewModel.stories.count {
+                if endAxis == .horizontal, containerViewModel.config.containerGestures.horizontalSwipes {
+                    if deltaX <= -threshold, containerViewModel.currentStoryIndex + 1 < containerViewModel.stories.count {
                         performHorizontalSwitch(.next)
-                        activeDragAxis = .none
-                        verticalMode = .none
-                        verticalBaseOffset = 0
-                        verticalBaseDY = 0
-                        horizontalBaseOffset = 0
-                        horizontalBaseDX = 0
+                        resetDragAxisState()
                         return
-                    } else if deltaX >= threshold, containerViewModel.currentIndex - 1 >= 0 {
+                    } else if deltaX >= threshold, containerViewModel.currentStoryIndex - 1 >= 0 {
                         performHorizontalSwitch(.prev)
-                        activeDragAxis = .none
-                        verticalMode = .none
-                        verticalBaseOffset = 0
-                        verticalBaseDY = 0
-                        horizontalBaseOffset = 0
-                        horizontalBaseDX = 0
+                        resetDragAxisState()
                         return
                     }
                 }
 
                 let hadVertical = verticalDrag != 0
                 if hadVertical { isVerticalSnappingBack = true }
-                let snapBack: Double = config.physics.snapBackDuration
+                let snapBack: Double = containerViewModel.config.physics.snapBackDuration
                 withAnimation(.spring(response: snapBack, dampingFraction: 0.9)) {
                     horizontalDrag = 0
                     verticalDrag = 0
@@ -399,31 +404,7 @@ struct StoriesContainerView: View {
                     if hadVertical { isVerticalSnappingBack = false }
                     containerViewModel.currentStoryViewModel.pause(false)
                 }
-                activeDragAxis = .none
-                verticalMode = .none
-                verticalBaseOffset = 0
-                verticalBaseDY = 0
-                horizontalBaseOffset = 0
-                horizontalBaseDX = 0
+                resetDragAxisState()
             }
-    }
-}
-
-extension StoriesContainerView {
-    init(story: Story, onDismiss: (() -> Void)? = nil) {
-        struct SingleStoryFeed: StoriesFeedProtocol {
-            let stories: [StoryProtocol]
-            let startIndex: Int = 0
-            init(_ story: Story) {
-                let mapped = AnyStory(
-                    id: story.id,
-                    user: AnyStoryUser(name: story.user.name, avatarURL: story.user.avatarURL),
-                    items: story.items.map { AnyStoryItem(id: $0.id, imageURL: $0.imageURL) }
-                )
-                self.stories = [mapped]
-            }
-        }
-        let feed = SingleStoryFeed(story)
-        self.init(feed: feed, onDismiss: onDismiss)
     }
 }

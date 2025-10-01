@@ -8,7 +8,7 @@
 import Combine
 import SwiftUI
 
-final class StoryViewModel: ObservableObject {
+final class StoryViewModel: StoryViewModelProtocol {
     private let autoAdvanceConfig: StoryAutoAdvanceConfig
 
     @Published private(set) var story: StoryProtocol
@@ -129,6 +129,13 @@ final class StoryViewModel: ObservableObject {
         }
     }
 
+    func advance(to direction: StoryAdvanceDirection) {
+        switch direction {
+        case .next: self.next()
+        case .previous: self.prev()
+        }
+    }
+
     func onCurrentItemLoaded() {
         isCurrentItemLoaded = true
         if timerRef == nil { start() }
@@ -153,3 +160,4 @@ final class StoryViewModel: ObservableObject {
         }
     }
 }
+

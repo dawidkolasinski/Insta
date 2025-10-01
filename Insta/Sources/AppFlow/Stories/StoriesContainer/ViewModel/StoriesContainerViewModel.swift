@@ -11,133 +11,136 @@ import Combine
 import Foundation
 import SwiftUI
 
-final class StoriesContainerViewModel: ObservableObject {
-    private let feed: StoriesFeedProtocol
-
-    @Published private(set) var currentIndex: Int
+final class StoriesContainerViewModel: StoriesContainerViewModelProtocol {
+    private let storiesFeed: StoriesFeedProtocol
+    let config: StoriesComponentConfig
+    
+    @Published private(set) var currentStoryIndex: Int
     @Published private(set) var currentStoryViewModel: StoryViewModel
-    @Published private(set) var isDirectionForward: Bool = true
 
-    let dismissRequested = PassthroughSubject<Void, Never>()
-    let resetDragRequested = PassthroughSubject<Void, Never>()
-    let nextStoryRequested = PassthroughSubject<Void, Never>()
+    private let dismissRequestedSubject = PassthroughSubject<Void, Never>()
+    private let resetDragRequestedSubject = PassthroughSubject<Void, Never>()
+    private let nextStoryRequestedSubject = PassthroughSubject<Void, Never>()
 
-    private var childFinishCancellable: AnyCancellable?
-    private var childPrevCancellable: AnyCancellable?
-    private var storyViewModels: [StoryViewModel] = []
+    private var storyViewModelList: [StoryViewModel] = []
+    private var subscriptions: Set<AnyCancellable> = []
 
-    var stories: [StoryProtocol] { feed.stories }
-
-    var currentStory: StoryProtocol {
-        guard let story = stories[safe: currentIndex] ?? stories.first else {
-            fatalError("StoriesContainerViewModel should not be used with an empty stories array.")
-        }
-        return story
+    var dismissRequested: AnyPublisher<Void, Never> {
+        dismissRequestedSubject.eraseToAnyPublisher()
+    }
+    var resetDragRequested: AnyPublisher<Void, Never> {
+        resetDragRequestedSubject.eraseToAnyPublisher()
+    }
+    var nextStoryRequested: AnyPublisher<Void, Never> {
+        nextStoryRequestedSubject.eraseToAnyPublisher()
     }
 
     var previousStoryViewModel: StoryViewModel? {
-        (currentIndex - 1) >= 0 ? storyViewModels[safe: currentIndex - 1] : nil
+        storyViewModelList[safe: currentStoryIndex - 1]
     }
-
     var nextStoryViewModel: StoryViewModel? {
-        (currentIndex + 1) < storyViewModels.count ? storyViewModels[safe: currentIndex + 1] : nil
+        storyViewModelList[safe: currentStoryIndex + 1]
     }
+    var stories: [StoryProtocol] { storiesFeed.stories }
+    var currentStory: StoryProtocol { stories[safe: currentStoryIndex] ?? stories.first! }
 
-    init(feed: StoriesFeedProtocol) {
-        self.feed = feed
-        let startIndex = max(0, min(feed.startIndex, max(0, feed.stories.count - 1)))
-        self.currentIndex = startIndex
+    init(feed: StoriesFeedProtocol, config: StoriesComponentConfig = .init()) {
+        self.storiesFeed = feed
+        self.config = config
+        let safeStartIndex = max(0, min(feed.startIndex, feed.stories.count - 1))
+        self.currentStoryIndex = safeStartIndex
+        self.storyViewModelList = feed.stories.map { StoryViewModel(story: $0) }
 
-        let createdViewModels = feed.stories.map { StoryViewModel(story: $0) }
-        self.storyViewModels = createdViewModels
-
-        if let initialViewModel = createdViewModels[safe: startIndex] {
-            self.currentStoryViewModel = initialViewModel
-            for (index, vm) in createdViewModels.enumerated() {
-                vm.pause(index != startIndex)
-            }
-        } else {
-            fatalError("No stories are available to show. The view model should not be initialized with empty stories.")
+        guard let initialStoryViewModel = storyViewModelList[safe: safeStartIndex] else {
+            fatalError("StoriesContainerViewModel should not be initialized with empty stories array")
         }
-
-        bindChild()
+        self.currentStoryViewModel = initialStoryViewModel
+        setActiveStory(at: safeStartIndex, direction: .next)
     }
 
     func goToNextStory() {
-        isDirectionForward = true
-        if currentIndex + 1 < stories.count {
-            currentIndex += 1
-            swapChildForCurrent()
-        }
+        transition(to: currentStoryIndex + 1, direction: .next)
     }
 
     func goToPreviousStory() {
-        isDirectionForward = false
-        if currentIndex - 1 >= 0 {
-            currentIndex -= 1
-            swapChildForCurrent()
+        transition(to: currentStoryIndex - 1, direction: .prev)
+    }
+
+    private func transition(to newIndex: Int, direction: StoriesSwitchDirection) {
+        guard newIndex != currentStoryIndex,
+              newIndex >= 0, newIndex < stories.count else { return }
+
+        setActiveStory(at: newIndex, direction: direction)
+    }
+
+    private func setActiveStory(at index: Int, direction: StoriesSwitchDirection) {
+        subscriptions.removeAll()
+
+        for (storyIndex, storyViewModel) in storyViewModelList.enumerated() {
+            if storyIndex == index {
+                storyViewModel.becomeCurrentStory()
+            } else {
+                storyViewModel.resignCurrentStory()
+            }
         }
+
+        currentStoryIndex = index
+        currentStoryViewModel = storyViewModelList[index]
+
+        currentStoryViewModel.didFinishPublisher
+            .sink { [weak self] in self?.handleDidFinish() }
+            .store(in: &subscriptions)
+
+        currentStoryViewModel.requestPreviousPublisher
+            .sink { [weak self] in self?.handleRequestPrevious() }
+            .store(in: &subscriptions)
     }
 
-    private func bindChild() {
-        childFinishCancellable?.cancel()
-        childPrevCancellable?.cancel()
-
-        childFinishCancellable = currentStoryViewModel.$didFinish
-            .removeDuplicates()
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] finished in
-                guard let self = self, finished else { return }
-                self.handleChildFinished()
-            }
-
-        childPrevCancellable = currentStoryViewModel.$requestPrevStory
-            .removeDuplicates()
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] requested in
-                guard let self = self, requested else { return }
-                self.handlePrevRequested()
-            }
-    }
-
-    private func handleChildFinished() {
-        isDirectionForward = true
-        currentStoryViewModel.clearDidFinish()
-        let nextIndex = currentIndex + 1
-        if nextIndex < stories.count {
-            DispatchQueue.main.async { [weak self] in
-                self?.nextStoryRequested.send()
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                self?.nextStoryRequested.send()
+    private func handleDidFinish() {
+        if currentStoryIndex + 1 < stories.count {
+            DispatchQueue.main.async {
+                self.nextStoryRequestedSubject.send()
             }
         } else {
-            dismissRequested.send()
+            dismissRequestedSubject.send()
         }
     }
 
-    private func handlePrevRequested() {
-        isDirectionForward = false
-        currentStoryViewModel.clearRequestPrev()
-        if currentIndex - 1 >= 0 {
-            currentIndex -= 1
-            swapChildForCurrent()
-            resetDragRequested.send()
+    private func handleRequestPrevious() {
+        if currentStoryIndex - 1 >= 0 {
+            transition(to: currentStoryIndex - 1, direction: .prev)
+            resetDragRequestedSubject.send()
         }
     }
+}
 
-    private func swapChildForCurrent() {
-        for (index, vm) in storyViewModels.enumerated() { vm.pause(index != currentIndex) }
-        if let newViewModel = storyViewModels[safe: currentIndex] {
-            currentStoryViewModel = newViewModel
-            currentStoryViewModel.clearDidFinish()
-            currentStoryViewModel.clearRequestPrev()
-            bindChild()
-        }
+// MARK: - StoryViewModel Delegation Helpers
+
+private extension StoryViewModel {
+    func becomeCurrentStory() {
+        pause(false)
+        clearDidFinish()
+        clearRequestPrev()
+        start()
     }
-
-    deinit {
-        childFinishCancellable?.cancel()
-        childPrevCancellable?.cancel()
+    func resignCurrentStory() {
+        pause(true)
+        stop()
+        clearDidFinish()
+        clearRequestPrev()
+    }
+    var didFinishPublisher: AnyPublisher<Void, Never> {
+        $didFinish
+            .removeDuplicates()
+            .filter { $0 }
+            .map { _ in }
+            .eraseToAnyPublisher()
+    }
+    var requestPreviousPublisher: AnyPublisher<Void, Never> {
+        $requestPrevStory
+            .removeDuplicates()
+            .filter { $0 }
+            .map { _ in }
+            .eraseToAnyPublisher()
     }
 }

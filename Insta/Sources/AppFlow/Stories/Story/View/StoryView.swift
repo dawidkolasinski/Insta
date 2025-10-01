@@ -8,29 +8,22 @@
 import SwiftUI
 import Combine
 
-struct StoryView: View {
+enum StoryAdvanceDirection {
+    case previous
+    case next
+}
+
+
+struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     @Environment(\.scenePhase) private var scenePhase
-    @ObservedObject private var viewModel: StoryViewModel
+    @ObservedObject private var viewModel: ViewModel
     @State private var isHolding: Bool = false
     @State private var holdWorkItem: DispatchWorkItem?
+
     let onDismiss: (() -> Void)?
     let style: ImageSlidesStyle
     let holdConfig: HoldConfig
     let topOverlayHeight: CGFloat
-
-    init(
-        viewModel: StoryViewModel,
-        onDismiss: (() -> Void)?,
-        style: ImageSlidesStyle,
-        holdConfig: HoldConfig,
-        topOverlayHeight: CGFloat
-    ) {
-        self.viewModel = viewModel
-        self.onDismiss = onDismiss
-        self.style = style
-        self.holdConfig = holdConfig
-        self.topOverlayHeight = topOverlayHeight
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -54,6 +47,20 @@ struct StoryView: View {
         }
     }
 
+    init(
+        viewModel: ViewModel,
+        onDismiss: (() -> Void)?,
+        style: ImageSlidesStyle,
+        holdConfig: HoldConfig,
+        topOverlayHeight: CGFloat
+    ) {
+        self.viewModel = viewModel
+        self.onDismiss = onDismiss
+        self.style = style
+        self.holdConfig = holdConfig
+        self.topOverlayHeight = topOverlayHeight
+    }
+
     private var contentContainer: some View {
         ZStack {
             backgroundImage
@@ -61,47 +68,21 @@ struct StoryView: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .highPriorityGesture(
-                        TapGesture().onEnded {
-                            guard !isHolding else { return }
-                            viewModel.pause(false)
-                            withTransaction(Transaction(animation: nil)) { viewModel.prev() }
-                        }
+                        TapGesture().onEnded { handleTap(direction: .previous) }
                     )
-                    .simultaneousGesture(holdGesture)
+                    .accessibilityLabel("Previous story")
                 Color.clear
                     .contentShape(Rectangle())
                     .highPriorityGesture(
-                        TapGesture().onEnded {
-                            guard !isHolding else { return }
-                            viewModel.pause(false)
-                            withTransaction(Transaction(animation: nil)) { viewModel.next() }
-                        }
+                        TapGesture().onEnded { handleTap(direction: .next) }
                     )
-                    .simultaneousGesture(holdGesture)
+                    .accessibilityLabel("Next story")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .simultaneousGesture(holdGesture)
         }
         .overlay(alignment: .top) { topOverlay }
-        .modifier(StyleApplier(style: style))
-        .animation(nil, value: (viewModel.currentItem as StoryItemProtocol).id)
-        .animation(nil, value: (viewModel.story as StoryProtocol).id)
-    }
-
-    private struct StyleApplier: ViewModifier {
-        let style: ImageSlidesStyle
-        func body(content: Content) -> some View {
-            switch style {
-            case let .card(aspect, radius):
-                content
-                    .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .aspectRatio(aspect, contentMode: .fit)
-            case let .fullscreen(ignore):
-                content
-                    .ignoresSafeArea(ignore ? .all : [])
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
+        .storyImageSlidesStyle(style)
     }
 
     @ViewBuilder
@@ -109,7 +90,7 @@ struct StoryView: View {
         if viewModel.items.isEmpty {
             Color.black
         } else {
-            let item = (viewModel.currentItem as StoryItemProtocol)
+            let item = viewModel.currentItem
             let itemID = item.id
             let url = item.imageURL
 
@@ -118,7 +99,9 @@ struct StoryView: View {
                     .resizable()
                     .scaledToFill()
                     .clipped()
-                    .onAppear { viewModel.onCurrentItemLoaded() }
+                    .onAppear {
+                        viewModel.onCurrentItemLoaded()
+                    }
             } else {
                 AsyncImage(url: url, transaction: Transaction(animation: nil)) { phase in
                     switch phase {
@@ -131,12 +114,12 @@ struct StoryView: View {
                                 viewModel.store(image: img, for: itemID)
                                 viewModel.onCurrentItemLoaded()
                             }
-                    case .failure:
-                        Color.black
-                            .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { viewModel.onCurrentItemLoaded() } }
                     default:
                         Color.black
-                            .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { viewModel.onCurrentItemLoaded() } }
+                            .onAppear {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { viewModel.onCurrentItemLoaded()
+                                }
+                            }
                     }
                 }
             }
@@ -166,14 +149,14 @@ struct StoryView: View {
                 .accessibilityLabel("\(viewModel.index + 1) z \(viewModel.items.count)")
 
                 HStack(spacing: 12) {
-                    if let avatar = (viewModel.story.user as StoryUserProtocol).avatarURL {
+                    if let avatar = viewModel.story.user.avatarURL {
                         StoryAvatarView(url: avatar, seen: false, displayedPlace: .storyDetail)
                     } else {
                         Image(systemName: "person.crop.circle.fill")
                             .foregroundStyle(.white)
                             .font(.title2)
                     }
-                    Text((viewModel.story.user as StoryUserProtocol).name)
+                    Text(viewModel.story.user.name)
                         .font(.headline)
                         .foregroundStyle(.white)
                     Text("•").foregroundStyle(.white.opacity(0.7))
@@ -243,6 +226,14 @@ struct StoryView: View {
             isHolding = false
             viewModel.hold(false)
             viewModel.pause(false)
+        }
+    }
+
+    private func handleTap(direction: StoryAdvanceDirection) {
+        guard !isHolding else { return }
+        viewModel.pause(false)
+        withTransaction(Transaction(animation: nil)) {
+            viewModel.advance(to: direction)
         }
     }
 }
