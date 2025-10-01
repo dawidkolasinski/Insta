@@ -8,13 +8,13 @@
 import SwiftUI
 
 struct StoriesFeedAdapter: StoriesFeedProtocol {
-    let stories: [any StoryProtocol]
+    let stories: [StoryProtocol]
     let startIndex: Int
 }
 
 extension StoriesFeedAdapter {
     init(viewModels: [StoryItemViewModel], startIndex: Int = 0) {
-        let mapped: [any StoryProtocol] = viewModels.map { vm in
+        let mapped: [StoryProtocol] = viewModels.map { vm in
             AnyStory(
                 id: vm.story.id,
                 user: AnyStoryUser(name: vm.story.user.name, avatarURL: vm.story.user.avatarURL),

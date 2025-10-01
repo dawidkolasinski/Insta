@@ -10,8 +10,13 @@ import Foundation
 
 final class StoriesListViewModel: ObservableObject {
     @Published private(set) var stories: [Story] = []
-    private var page: Int = 0
-    private let repo = StoryRepository()
+
+    private let storyRepository: StoryRepository
+    private var currentPage: Int = 0
+
+    init(storyRepository: StoryRepository = StoryRepository()) {
+        self.storyRepository = storyRepository
+    }
 
     func loadInitial() async {
         guard stories.isEmpty else { return }
@@ -27,9 +32,9 @@ final class StoriesListViewModel: ObservableObject {
     }
 
     private func loadMore() async {
-        if let pageStories = try? await repo.loadPage(page) {
+        if let pageStories = try? await storyRepository.loadPage(currentPage) {
             stories.append(contentsOf: pageStories)
-            page += 1
+            currentPage += 1
         }
     }
 }

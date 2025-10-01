@@ -9,15 +9,14 @@ import SwiftUI
 import Combine
 
 struct StoryView: View {
-    @ObservedObject var viewModel: StoryViewModel
+    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var viewModel: StoryViewModel
+    @State private var isHolding: Bool = false
+    @State private var holdWorkItem: DispatchWorkItem?
     let onDismiss: (() -> Void)?
     let style: ImageSlidesStyle
     let holdConfig: HoldConfig
     let topOverlayHeight: CGFloat
-    @Environment(\.scenePhase) private var scenePhase
-
-    @State private var isHolding: Bool = false
-    @State private var holdWorkItem: DispatchWorkItem?
 
     init(
         viewModel: StoryViewModel,
@@ -37,7 +36,6 @@ struct StoryView: View {
         VStack(spacing: 0) {
             contentContainer
         }
-        .background(Color.clear)
         .onChange(of: scenePhase) { phase in
             switch phase {
             case .active: viewModel.pause(false)

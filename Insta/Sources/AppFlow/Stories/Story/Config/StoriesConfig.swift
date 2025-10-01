@@ -75,7 +75,7 @@ enum StoriesSwitchStyle: Equatable {
     )
     case timingSlide(duration: Double = 0.22)
 
-    func run(direction: StoriesContainerView.SwitchDirection,
+    func run(direction: StoriesSwitchDirection,
              width: CGFloat,
              setDrag: @escaping (CGFloat) -> Void) -> Double {
         let offset = (direction == .next ? -1 : 1) * width

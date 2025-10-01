@@ -8,21 +8,17 @@
 import SwiftUI
 import Combine
 
-enum DragAxis { case none, horizontal, vertical }
-enum VerticalMode { case none, fromY }
-
 struct StoriesContainerView: View {
-    @StateObject private var containerVM: StoriesContainerViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    // Horizontal/vertical interaction state
+    @StateObject private var containerViewModel: StoriesContainerViewModel
+
     @State private var horizontalDrag: CGFloat = 0
     @State private var verticalDrag: CGFloat = 0
     @State private var activeDragAxis: DragAxis = .none
-    @State private var verticalMode: VerticalMode = .none
+    @State private var verticalMode: StoriesVerticalGestureMode = .none
     @State private var isInteractiveSwitch: Bool = false
     @State private var isVerticalSnappingBack: Bool = false
-
-    // Geometry-dependent state
     @State private var containerWidth: CGFloat = 0
     @State private var containerHeight: CGFloat = 0
     @State private var containerOpacity: Double = 1
@@ -31,12 +27,10 @@ struct StoriesContainerView: View {
     @State private var horizontalBaseOffset: CGFloat = 0
     @State private var horizontalBaseDX: CGFloat = 0
     @State private var animWidth: CGFloat = 0
-
     @Binding private var dismissProgress: CGFloat
+
     private let onDismiss: (() -> Void)?
     private let config: StoriesComponentConfig
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var springAnimation: Animation {
         .interactiveSpring(
@@ -44,72 +38,6 @@ struct StoriesContainerView: View {
             dampingFraction: config.physics.interactiveSwitchDamping,
             blendDuration: 0.1
         )
-    }
-
-    init(
-        feed: any StoriesFeedProtocol,
-        onDismiss: (() -> Void)? = nil,
-        dismissProgress: Binding<CGFloat> = .constant(0),
-        config: StoriesComponentConfig = .init()
-    ) {
-        self.onDismiss = onDismiss
-        self._dismissProgress = dismissProgress
-        self.config = config
-        _containerVM = StateObject(wrappedValue: StoriesContainerViewModel(feed: feed))
-    }
-
-    enum SwitchDirection { case next, prev }
-
-    private func performHorizontalSwitch(_ direction: SwitchDirection) {
-        guard !isInteractiveSwitch else { return }
-
-        let computedWidth: CGFloat = {
-            if containerWidth > 0 { return containerWidth }
-            #if os(iOS) || os(tvOS) || os(visionOS)
-            return UIScreen.main.bounds.width
-            #else
-            return 320
-            #endif
-        }()
-        animWidth = computedWidth
-        let startIndex = containerVM.currentIndex
-
-        switch direction {
-        case .next:
-            guard containerVM.currentIndex + 1 < containerVM.stories.count else { animWidth = 0; return }
-        case .prev:
-            guard containerVM.currentIndex - 1 >= 0 else { animWidth = 0; return }
-        }
-
-        isInteractiveSwitch = true
-        containerVM.storyVM.pause(true)
-
-        let fromDrag = abs(horizontalDrag) > 1
-        if !fromDrag {
-            let sign: CGFloat = (direction == .next) ? -1 : 1
-            withTransaction(Transaction(animation: nil)) {
-                horizontalDrag = sign * max(0.5, computedWidth * 0.001)
-            }
-        }
-
-        let duration: Double = config.switchStyle.run(direction: direction, width: computedWidth) { newDrag in
-            horizontalDrag = newDrag
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
-            if containerVM.currentIndex == startIndex {
-                switch direction {
-                case .next: containerVM.goNextStory()
-                case .prev: containerVM.goPrevStory()
-                }
-            }
-            isInteractiveSwitch = false
-            withTransaction(Transaction(animation: nil)) { horizontalDrag = 0 }
-            verticalDrag = 0
-            dismissProgress = 0
-            containerVM.storyVM.pause(false)
-            animWidth = 0
-        }
     }
 
     var body: some View {
@@ -131,23 +59,20 @@ struct StoriesContainerView: View {
                 }
                 .onChange(of: height) { containerHeight = $0 }
             ZStack {
-                if !containerVM.stories.isEmpty {
-                    if showNeighbors, let prev = containerVM.prevVM {
+                if !containerViewModel.stories.isEmpty {
+                    if showNeighbors, let prev = containerViewModel.previousStoryViewModel {
                         StoryView(viewModel: prev, onDismiss: onDismiss, style: config.style, holdConfig: config.hold, topOverlayHeight: config.topOverlayHeight)
-                            .id((prev.story as StoryProtocol).id)
                             .offset(x: horizontalDrag - effectiveWidth)
                             .allowsHitTesting(false)
                             .zIndex(0)
                     }
-                    if showNeighbors, let next = containerVM.nextVM {
+                    if showNeighbors, let next = containerViewModel.nextStoryViewModel {
                         StoryView(viewModel: next, onDismiss: onDismiss, style: config.style, holdConfig: config.hold, topOverlayHeight: config.topOverlayHeight)
-                            .id((next.story as StoryProtocol).id)
                             .offset(x: horizontalDrag + effectiveWidth)
                             .allowsHitTesting(false)
                             .zIndex(0)
                     }
-                    StoryView(viewModel: containerVM.storyVM, onDismiss: onDismiss, style: config.style, holdConfig: config.hold, topOverlayHeight: config.topOverlayHeight)
-                        .id((containerVM.currentStory as StoryProtocol).id)
+                    StoryView(viewModel: containerViewModel.currentStoryViewModel, onDismiss: onDismiss, style: config.style, holdConfig: config.hold, topOverlayHeight: config.topOverlayHeight)
                         .offset(x: horizontalDrag)
                         .zIndex(1)
                 } else {
@@ -160,12 +85,11 @@ struct StoriesContainerView: View {
             .scaleEffect(reduceMotion ? 1 : (1 - 0.50 * easedVertical))
             .opacity(containerOpacity * max(0.0, 1 - 0.95 * Double(easedVertical)))
         }
-        .background(Color.clear.ignoresSafeArea())
         .simultaneousGesture(dragGesture)
-        .onReceive(containerVM.dismissRequested) { _ in
+        .onReceive(containerViewModel.dismissRequested) { _ in
             performDismissAnimation()
         }
-        .onReceive(containerVM.resetDragRequested) { _ in
+        .onReceive(containerViewModel.resetDragRequested) { _ in
             withTransaction(Transaction(animation: nil)) {
                 horizontalDrag = 0
                 verticalDrag = 0
@@ -180,9 +104,9 @@ struct StoriesContainerView: View {
                 horizontalBaseDX = 0
                 animWidth = 0
             }
-            containerVM.storyVM.pause(false)
+            containerViewModel.currentStoryViewModel.pause(false)
         }
-        .onReceive(containerVM.nextStoryRequested) { _ in
+        .onReceive(containerViewModel.nextStoryRequested) { _ in
             DispatchQueue.main.async {
                 performHorizontalSwitch(.next)
             }
@@ -190,6 +114,70 @@ struct StoriesContainerView: View {
         .onChange(of: verticalDrag) { newValue in
             let height = max(1, containerHeight)
             dismissProgress = min(1, max(0, newValue / height))
+        }
+    }
+
+    init(
+        feed: StoriesFeedProtocol,
+        onDismiss: (() -> Void)? = nil,
+        dismissProgress: Binding<CGFloat> = .constant(0),
+        config: StoriesComponentConfig = .init()
+    ) {
+        self.onDismiss = onDismiss
+        self._dismissProgress = dismissProgress
+        self.config = config
+        _containerViewModel = StateObject(wrappedValue: StoriesContainerViewModel(feed: feed))
+    }
+
+    private func performHorizontalSwitch(_ direction: StoriesSwitchDirection) {
+        guard !isInteractiveSwitch else { return }
+
+        let computedWidth: CGFloat = {
+            if containerWidth > 0 { return containerWidth }
+#if os(iOS) || os(tvOS) || os(visionOS)
+            return UIScreen.main.bounds.width
+#else
+            return 320
+#endif
+        }()
+        animWidth = computedWidth
+        let startIndex = containerViewModel.currentIndex
+
+        switch direction {
+        case .next:
+            guard containerViewModel.currentIndex + 1 < containerViewModel.stories.count else { animWidth = 0; return }
+        case .prev:
+            guard containerViewModel.currentIndex - 1 >= 0 else { animWidth = 0; return }
+        }
+
+        isInteractiveSwitch = true
+        containerViewModel.currentStoryViewModel.pause(true)
+
+        let fromDrag = abs(horizontalDrag) > 1
+        if !fromDrag {
+            let sign: CGFloat = (direction == .next) ? -1 : 1
+            withTransaction(Transaction(animation: nil)) {
+                horizontalDrag = sign * max(0.5, computedWidth * 0.001)
+            }
+        }
+
+        let duration: Double = config.switchStyle.run(direction: direction, width: computedWidth) { newDrag in
+            horizontalDrag = newDrag
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            if containerViewModel.currentIndex == startIndex {
+                switch direction {
+                case .next: containerViewModel.goToNextStory()
+                case .prev: containerViewModel.goToPreviousStory()
+                }
+            }
+            isInteractiveSwitch = false
+            withTransaction(Transaction(animation: nil)) { horizontalDrag = 0 }
+            verticalDrag = 0
+            dismissProgress = 0
+            containerViewModel.currentStoryViewModel.pause(false)
+            animWidth = 0
         }
     }
 
@@ -228,8 +216,8 @@ struct StoriesContainerView: View {
                 let deltaY = value.translation.height
                 let hysteresis: CGFloat = config.physics.horizontalHysteresis
 
-                let isAtFirst = containerVM.currentIndex <= 0
-                let isAtLast = containerVM.currentIndex >= max(0, containerVM.stories.count - 1)
+                let isAtFirst = containerViewModel.currentIndex <= 0
+                let isAtLast = containerViewModel.currentIndex >= max(0, containerViewModel.stories.count - 1)
                 let overscrollMissingNeighbor = (deltaX > 0 && isAtFirst) || (deltaX < 0 && isAtLast)
 
                 if activeDragAxis == .none {
@@ -263,7 +251,7 @@ struct StoriesContainerView: View {
                 }
 
                 if activeDragAxis != .none {
-                    containerVM.storyVM.pause(true)
+                    containerViewModel.currentStoryViewModel.pause(true)
                 }
 
                 switch activeDragAxis {
@@ -297,8 +285,8 @@ struct StoriesContainerView: View {
                 let deltaX = value.translation.width
                 let endVerticalFromY = max(0, value.translation.height)
 
-                let isAtFirst = containerVM.currentIndex <= 0
-                let isAtLast = containerVM.currentIndex >= max(0, containerVM.stories.count - 1)
+                let isAtFirst = containerViewModel.currentIndex <= 0
+                let isAtLast = containerViewModel.currentIndex >= max(0, containerViewModel.stories.count - 1)
                 let overscrollMissingNeighbor = (deltaX > 0 && isAtFirst) || (deltaX < 0 && isAtLast)
 
                 let threshold: CGFloat = max(60, containerWidth * config.physics.horizontalSwipeThresholdFraction)
@@ -366,7 +354,7 @@ struct StoriesContainerView: View {
                     }
                     DispatchQueue.main.asyncAfter(deadline: .now() + snapDuration) {
                         isVerticalSnappingBack = false
-                        containerVM.storyVM.pause(false)
+                        containerViewModel.currentStoryViewModel.pause(false)
                     }
                     activeDragAxis = .none
                     verticalMode = .none
@@ -378,7 +366,7 @@ struct StoriesContainerView: View {
                 }
 
                 if endAxis == .horizontal, config.containerGestures.horizontalSwipes {
-                    if deltaX <= -threshold, containerVM.currentIndex + 1 < containerVM.stories.count {
+                    if deltaX <= -threshold, containerViewModel.currentIndex + 1 < containerViewModel.stories.count {
                         performHorizontalSwitch(.next)
                         activeDragAxis = .none
                         verticalMode = .none
@@ -387,7 +375,7 @@ struct StoriesContainerView: View {
                         horizontalBaseOffset = 0
                         horizontalBaseDX = 0
                         return
-                    } else if deltaX >= threshold, containerVM.currentIndex - 1 >= 0 {
+                    } else if deltaX >= threshold, containerViewModel.currentIndex - 1 >= 0 {
                         performHorizontalSwitch(.prev)
                         activeDragAxis = .none
                         verticalMode = .none
@@ -409,7 +397,7 @@ struct StoriesContainerView: View {
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + snapBack) {
                     if hadVertical { isVerticalSnappingBack = false }
-                    containerVM.storyVM.pause(false)
+                    containerViewModel.currentStoryViewModel.pause(false)
                 }
                 activeDragAxis = .none
                 verticalMode = .none
@@ -424,7 +412,7 @@ struct StoriesContainerView: View {
 extension StoriesContainerView {
     init(story: Story, onDismiss: (() -> Void)? = nil) {
         struct SingleStoryFeed: StoriesFeedProtocol {
-            let stories: [any StoryProtocol]
+            let stories: [StoryProtocol]
             let startIndex: Int = 0
             init(_ story: Story) {
                 let mapped = AnyStory(

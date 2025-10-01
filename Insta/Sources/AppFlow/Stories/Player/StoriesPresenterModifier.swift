@@ -9,7 +9,7 @@ import SwiftUI
 
 struct StoriesPresenterModifier: ViewModifier {
     @Binding var isPresented: Bool
-    var feed: any StoriesFeedProtocol
+    var feed: StoriesFeedProtocol
     @Binding var dismissProgress: CGFloat
     var config: StoriesComponentConfig
     func body(content: Content) -> some View {
@@ -41,7 +41,7 @@ struct StoriesPresenterModifier: ViewModifier {
 extension View {
     func storiesPresenter(
         isPresented: Binding<Bool>,
-        feed: any StoriesFeedProtocol,
+        feed: StoriesFeedProtocol,
         dismissProgress: Binding<CGFloat> = .constant(0),
         config: StoriesComponentConfig = .init()
     ) -> some View {
