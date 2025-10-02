@@ -22,8 +22,10 @@ struct StoryImageSlidesStyleViewModifier: ViewModifier {
 
         case .fullscreen:
             content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .scaledToFill()
                 .clipped()
+                .contentShape(Rectangle())
         }
     }
 }

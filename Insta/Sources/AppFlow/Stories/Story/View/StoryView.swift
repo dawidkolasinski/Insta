@@ -23,10 +23,11 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     let style: ImageSlidesStyle
     let holdConfig: HoldConfig
     let topOverlayHeight: CGFloat
+    let overrideTopSafeAreaInset: CGFloat?
 
     private var isFullscreenIgnoringSafeAreas: Bool {
-        if case let .fullscreen(ignore) = style {
-            return ignore
+        if case let .fullscreen(ignoreSafeAreas) = style {
+            return ignoreSafeAreas
         }
         return false
     }
@@ -58,27 +59,23 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
         onDismiss: (() -> Void)?,
         style: ImageSlidesStyle,
         holdConfig: HoldConfig,
-        topOverlayHeight: CGFloat
+        topOverlayHeight: CGFloat,
+        overrideTopSafeAreaInset: CGFloat? = nil,
     ) {
         self.viewModel = viewModel
         self.onDismiss = onDismiss
         self.style = style
         self.holdConfig = holdConfig
         self.topOverlayHeight = topOverlayHeight
+        self.overrideTopSafeAreaInset = overrideTopSafeAreaInset
     }
 
     private var contentContainer: some View {
         GeometryReader { geo in
+            let topInset = isFullscreenIgnoringSafeAreas ? (overrideTopSafeAreaInset ?? UIWindow.topSafeAreaInset) : 0
+
             ZStack {
-                switch style {
-                case .fullscreen:
-                    backgroundBase
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .storyImageSlidesStyle(style)
-                case .card:
-                    backgroundBase
-                        .storyImageSlidesStyle(style)
-                }
+                backgroundStyled
 
                 HStack(spacing: 0) {
                     Color.clear
@@ -98,13 +95,50 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                 .simultaneousGesture(holdGesture)
             }
             .frame(width: geo.size.width, height: geo.size.height)
-            .ignoresSafeArea(isFullscreenIgnoringSafeAreas ? .all : [])
-            .overlay(alignment: .top) { topOverlay }
+            .clipped()
+            .overlay(alignment: .top) {
+                LinearGradient(
+                    colors: [Color.black.opacity(0.65), Color.black.opacity(0.0)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: topOverlayHeight + topInset)
+                .allowsHitTesting(false)
+                .ignoresSafeArea(edges: .top)
+            }
+            .overlay(alignment: .top) {
+                topBarContent
+                    .padding(.top, topInset + 12)
+            }
         }
     }
 
     @ViewBuilder
-    private var backgroundBase: some View {
+    private var backgroundStyled: some View {
+        switch style {
+        case let .card(aspectRatio, cornerRadius):
+            backgroundBase(contentMode: .fit)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .aspectRatio(aspectRatio, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+        case let .fullscreen(ignoreSafeAreas):
+            let base = backgroundBase(contentMode: .fill)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .contentShape(Rectangle())
+            if ignoreSafeAreas {
+                base.ignoresSafeArea()
+            } else {
+                base
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func backgroundBase(contentMode: ContentMode) -> some View {
         if viewModel.items.isEmpty {
             Color.black
         } else {
@@ -112,84 +146,81 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
             let itemID = item.id
             let url = item.imageURL
 
-            if let cached = viewModel.cachedImage(for: itemID) {
-                cached
-                    .resizable()
-                    .onAppear { viewModel.onCurrentItemLoaded() }
-            } else {
-                AsyncImage(url: url, transaction: Transaction(animation: nil)) { phase in
-                    switch phase {
-                    case .success(let img):
-                        img
-                            .resizable()
-                            .onAppear {
-                                viewModel.store(image: img, for: itemID)
-                                viewModel.onCurrentItemLoaded()
-                            }
-                    default:
-                        Color.black
-                            .onAppear {
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            ZStack {
+                if let cached = viewModel.cachedImage(for: itemID) {
+                    cached
+                        .resizable()
+                        .imageScaleMode(contentMode)
+                        .onAppear { viewModel.onCurrentItemLoaded() }
+                } else {
+                    AsyncImage(url: url, transaction: Transaction(animation: nil)) { phase in
+                        switch phase {
+                        case .success(let img):
+                            img
+                                .resizable()
+                                .imageScaleMode(contentMode)
+                                .onAppear {
+                                    viewModel.store(image: img, for: itemID)
                                     viewModel.onCurrentItemLoaded()
                                 }
-                            }
+                        default:
+                            Color.black
+                                .onAppear {
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                                        viewModel.onCurrentItemLoaded()
+                                    }
+                                }
+                        }
                     }
                 }
             }
         }
     }
 
-    private var topOverlay: some View {
-        ZStack(alignment: .top) {
-            LinearGradient(colors: [Color.black.opacity(0.65), Color.black.opacity(0.0)], startPoint: .top, endPoint: .bottom)
-                .frame(height: topOverlayHeight)
-                .allowsHitTesting(false)
-                .ignoresSafeArea(edges: isFullscreenIgnoringSafeAreas ? .top : [])
-
-            VStack(spacing: 8) {
-                HStack(spacing: 4) {
-                    ForEach(Array(viewModel.items.indices), id: \.self) { barIndex in
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(Color.white.opacity(0.25))
-                                Capsule().fill(Color.white)
-                                    .frame(width: geo.size.width * filledAmount(for: barIndex))
-                            }
+    private var topBarContent: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 4) {
+                ForEach(Array(viewModel.items.indices), id: \.self) { barIndex in
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.white.opacity(0.25))
+                            Capsule().fill(Color.white)
+                                .frame(width: geo.size.width * filledAmount(for: barIndex))
+                                .animation(nil, value: viewModel.index)
                         }
                     }
                 }
-                .frame(height: 2)
-                .padding(.horizontal, 8)
-                .accessibilityLabel("\(viewModel.index + 1) z \(viewModel.items.count)")
-
-                HStack(spacing: 12) {
-                    if let avatar = viewModel.story.user.avatarURL {
-                        StoryAvatarView(url: avatar, seen: false, displayedPlace: .storyDetail)
-                    } else {
-                        Image(systemName: "person.crop.circle.fill")
-                            .foregroundStyle(.white)
-                            .font(.title2)
-                    }
-                    Text(viewModel.story.user.name)
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                    Text("•").foregroundStyle(.white.opacity(0.7))
-                    Text("\(viewModel.index + 1)/\(viewModel.items.count)")
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.9))
-                    Spacer()
-                    Button(action: { onDismiss?() }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(8)
-                            .background(Color.black.opacity(0.55), in: Circle())
-                    }
-                    .accessibilityLabel("Zamknij")
-                }
-                .padding(.horizontal)
             }
-            .padding(.top, 12)
+            .frame(height: 2)
+            .padding(.horizontal, 8)
+            .accessibilityLabel("\(viewModel.index + 1) / \(viewModel.items.count)")
+
+            HStack(spacing: 12) {
+                if let avatar = viewModel.story.user.avatarURL {
+                    StoryAvatarView(url: avatar, seen: false, displayedPlace: .storyDetail)
+                } else {
+                    Image(systemName: "person.crop.circle.fill")
+                        .foregroundStyle(.white)
+                        .font(.title2)
+                }
+                Text(viewModel.story.user.name)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text("•").foregroundStyle(.white.opacity(0.7))
+                Text("\(viewModel.index + 1)/\(viewModel.items.count)")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.9))
+                Spacer()
+                Button(action: { onDismiss?() }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(8)
+                        .background(Color.black.opacity(0.55), in: Circle())
+                }
+                .accessibilityLabel("Close")
+            }
+            .padding(.horizontal)
         }
     }
 
@@ -246,8 +277,6 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     private func handleTap(direction: StoryAdvanceDirection) {
         guard !isHolding else { return }
         viewModel.pause(false)
-        withTransaction(Transaction(animation: nil)) {
-            viewModel.advance(to: direction)
-        }
+        viewModel.advance(to: direction)
     }
 }

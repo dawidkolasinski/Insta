@@ -30,6 +30,7 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
     @Binding private var dismissProgress: CGFloat
 
     private let onDismiss: (() -> Void)?
+    private let topSafeAreaInset: CGFloat
 
     var body: some View {
         GeometryReader { geo in
@@ -54,36 +55,43 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
 
             ZStack {
                 if !containerViewModel.stories.isEmpty {
-                    if showNeighbors, let previous = containerViewModel.previousStoryViewModel {
+                    if let previous = containerViewModel.previousStoryViewModel {
                         StoryView(
                             viewModel: previous,
                             onDismiss: onDismiss,
                             style: containerViewModel.config.style,
                             holdConfig: containerViewModel.config.hold,
-                            topOverlayHeight: containerViewModel.config.topOverlayHeight
+                            topOverlayHeight: containerViewModel.config.topOverlayHeight,
+                            overrideTopSafeAreaInset: topSafeAreaInset,
                         )
                         .offset(x: horizontalDrag - effectiveWidth)
+                        .opacity(showNeighbors ? 1 : 0)
                         .allowsHitTesting(false)
                         .zIndex(0)
+                        .accessibilityHidden(true)
                     }
-                    if showNeighbors, let next = containerViewModel.nextStoryViewModel {
+                    if let next = containerViewModel.nextStoryViewModel {
                         StoryView(
                             viewModel: next,
                             onDismiss: onDismiss,
                             style: containerViewModel.config.style,
                             holdConfig: containerViewModel.config.hold,
-                            topOverlayHeight: containerViewModel.config.topOverlayHeight
+                            topOverlayHeight: containerViewModel.config.topOverlayHeight,
+                            overrideTopSafeAreaInset: topSafeAreaInset,
                         )
                         .offset(x: horizontalDrag + effectiveWidth)
+                        .opacity(showNeighbors ? 1 : 0)
                         .allowsHitTesting(false)
                         .zIndex(0)
+                        .accessibilityHidden(true)
                     }
                     StoryView(
                         viewModel: containerViewModel.currentStoryViewModel,
                         onDismiss: onDismiss,
                         style: containerViewModel.config.style,
                         holdConfig: containerViewModel.config.hold,
-                        topOverlayHeight: containerViewModel.config.topOverlayHeight
+                        topOverlayHeight: containerViewModel.config.topOverlayHeight,
+                        overrideTopSafeAreaInset: topSafeAreaInset,
                     )
                     .offset(x: horizontalDrag)
                     .zIndex(1)
@@ -93,6 +101,8 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
                         .font(.headline)
                 }
             }
+            .frame(width: width, height: height)
+            .clipped()
             .offset(y: verticalDrag)
             .scaleEffect(reduceMotion ? 1 : (1 - 0.50 * easedVertical))
             .opacity(containerOpacity * max(0.0, 1 - 0.95 * Double(easedVertical)))
@@ -121,14 +131,14 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
     init(
         viewModel: @autoclosure @escaping () -> ViewModel,
         onDismiss: (() -> Void)? = nil,
-        dismissProgress: Binding<CGFloat> = .constant(0)
+        dismissProgress: Binding<CGFloat> = .constant(0),
+        topSafeAreaInset: CGFloat
     ) {
         self.onDismiss = onDismiss
         self._dismissProgress = dismissProgress
+        self.topSafeAreaInset = topSafeAreaInset
         _containerViewModel = StateObject(wrappedValue: viewModel())
     }
-
-    // MARK: - Gesture / Animation Helpers
 
     private func resetDragAxisState() {
         activeDragAxis = .none
@@ -204,23 +214,25 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
             }
         }
 
-        let duration: Double = containerViewModel.config.switchStyle.run(direction: direction, width: computedWidth) { newDrag in
-            horizontalDrag = newDrag
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
-            if containerViewModel.currentStoryIndex == startIndex {
-                switch direction {
-                case .next: containerViewModel.goToNextStory()
-                case .prev: containerViewModel.goToPreviousStory()
-                }
+        DispatchQueue.main.async {
+            let duration: Double = containerViewModel.config.switchStyle.run(direction: direction, width: computedWidth) { newDrag in
+                horizontalDrag = newDrag
             }
-            isInteractiveSwitch = false
-            withTransaction(Transaction(animation: nil)) { horizontalDrag = 0 }
-            verticalDrag = 0
-            dismissProgress = 0
-            containerViewModel.currentStoryViewModel.pause(false)
-            animWidth = 0
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+                if containerViewModel.currentStoryIndex == startIndex {
+                    switch direction {
+                    case .next: containerViewModel.goToNextStory()
+                    case .prev: containerViewModel.goToPreviousStory()
+                    }
+                }
+                isInteractiveSwitch = false
+                withTransaction(Transaction(animation: nil)) { horizontalDrag = 0 }
+                verticalDrag = 0
+                dismissProgress = 0
+                containerViewModel.currentStoryViewModel.pause(false)
+                animWidth = 0
+            }
         }
     }
 

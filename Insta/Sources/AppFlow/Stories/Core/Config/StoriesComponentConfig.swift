@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct StoriesComponentConfig: Equatable {
-    var style: ImageSlidesStyle = .card()
+    var style: ImageSlidesStyle = .fullscreen(ignoreSafeAreas: true)
     var gestures: GesturesConfig = .allEnabled
     var containerGestures: StoriesContainerGesturesConfig = .init()
     var hold: HoldConfig = .init()
