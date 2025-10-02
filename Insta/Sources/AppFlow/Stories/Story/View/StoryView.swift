@@ -13,7 +13,6 @@ enum StoryAdvanceDirection {
     case next
 }
 
-
 struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var viewModel: ViewModel
@@ -24,6 +23,13 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     let style: ImageSlidesStyle
     let holdConfig: HoldConfig
     let topOverlayHeight: CGFloat
+
+    private var isFullscreenIgnoringSafeAreas: Bool {
+        if case let .fullscreen(ignore) = style {
+            return ignore
+        }
+        return false
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -62,31 +68,43 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     }
 
     private var contentContainer: some View {
-        ZStack {
-            backgroundImage
-            HStack(spacing: 0) {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .highPriorityGesture(
-                        TapGesture().onEnded { handleTap(direction: .previous) }
-                    )
-                    .accessibilityLabel("Previous story")
-                Color.clear
-                    .contentShape(Rectangle())
-                    .highPriorityGesture(
-                        TapGesture().onEnded { handleTap(direction: .next) }
-                    )
-                    .accessibilityLabel("Next story")
+        GeometryReader { geo in
+            ZStack {
+                switch style {
+                case .fullscreen:
+                    backgroundBase
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .storyImageSlidesStyle(style)
+                case .card:
+                    backgroundBase
+                        .storyImageSlidesStyle(style)
+                }
+
+                HStack(spacing: 0) {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .highPriorityGesture(
+                            TapGesture().onEnded { handleTap(direction: .previous) }
+                        )
+                        .accessibilityLabel("Previous story")
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .highPriorityGesture(
+                            TapGesture().onEnded { handleTap(direction: .next) }
+                        )
+                        .accessibilityLabel("Next story")
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
+                .simultaneousGesture(holdGesture)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .simultaneousGesture(holdGesture)
+            .frame(width: geo.size.width, height: geo.size.height)
+            .ignoresSafeArea(isFullscreenIgnoringSafeAreas ? .all : [])
+            .overlay(alignment: .top) { topOverlay }
         }
-        .overlay(alignment: .top) { topOverlay }
-        .storyImageSlidesStyle(style)
     }
 
     @ViewBuilder
-    private var backgroundImage: some View {
+    private var backgroundBase: some View {
         if viewModel.items.isEmpty {
             Color.black
         } else {
@@ -97,19 +115,13 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
             if let cached = viewModel.cachedImage(for: itemID) {
                 cached
                     .resizable()
-                    .scaledToFill()
-                    .clipped()
-                    .onAppear {
-                        viewModel.onCurrentItemLoaded()
-                    }
+                    .onAppear { viewModel.onCurrentItemLoaded() }
             } else {
                 AsyncImage(url: url, transaction: Transaction(animation: nil)) { phase in
                     switch phase {
                     case .success(let img):
                         img
                             .resizable()
-                            .scaledToFill()
-                            .clipped()
                             .onAppear {
                                 viewModel.store(image: img, for: itemID)
                                 viewModel.onCurrentItemLoaded()
@@ -117,7 +129,8 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                     default:
                         Color.black
                             .onAppear {
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { viewModel.onCurrentItemLoaded()
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                                    viewModel.onCurrentItemLoaded()
                                 }
                             }
                     }
@@ -131,6 +144,7 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
             LinearGradient(colors: [Color.black.opacity(0.65), Color.black.opacity(0.0)], startPoint: .top, endPoint: .bottom)
                 .frame(height: topOverlayHeight)
                 .allowsHitTesting(false)
+                .ignoresSafeArea(edges: isFullscreenIgnoringSafeAreas ? .top : [])
 
             VStack(spacing: 8) {
                 HStack(spacing: 4) {

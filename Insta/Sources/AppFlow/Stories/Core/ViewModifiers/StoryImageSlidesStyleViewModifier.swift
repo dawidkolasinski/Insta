@@ -14,13 +14,16 @@ struct StoryImageSlidesStyleViewModifier: ViewModifier {
         switch style {
         case let .card(aspect, radius):
             content
-                .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
                 .frame(maxWidth: .infinity, alignment: .center)
                 .aspectRatio(aspect, contentMode: .fit)
-        case let .fullscreen(ignore):
+                .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+        case .fullscreen:
             content
-                .ignoresSafeArea(ignore ? .all : [])
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .scaledToFill()
+                .clipped()
         }
     }
 }
@@ -30,3 +33,4 @@ extension View {
         modifier(StoryImageSlidesStyleViewModifier(style: style))
     }
 }
+
