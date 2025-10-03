@@ -15,7 +15,7 @@ protocol StoriesContainerViewModelProtocol: ViewModelProtocol {
     var nextStoryViewModel: StoryViewModel? { get }
     var stories: [StoryProtocol] { get }
     var currentStory: StoryProtocol { get }
-    var config: StoriesComponentConfig { get }
+    var config: StoriesContainerConfig { get }
 
     var dismissRequested: AnyPublisher<Void, Never> { get }
     var resetDragRequested: AnyPublisher<Void, Never> { get }

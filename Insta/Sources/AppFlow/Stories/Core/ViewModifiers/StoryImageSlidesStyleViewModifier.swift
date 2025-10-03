@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct StoryImageSlidesStyleViewModifier: ViewModifier {
-    let style: ImageSlidesStyle
+    let style: StoryImageStyle
 
     func body(content: Content) -> some View {
         switch style {
@@ -31,7 +31,7 @@ struct StoryImageSlidesStyleViewModifier: ViewModifier {
 }
 
 extension View {
-    func storyImageSlidesStyle(_ style: ImageSlidesStyle) -> some View {
+    func storyImageSlidesStyle(_ style: StoryImageStyle) -> some View {
         modifier(StoryImageSlidesStyleViewModifier(style: style))
     }
 }

@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-struct PhysicsConfig: Equatable {
+struct StoriesContainerPhysicsConfig: Equatable {
     var horizontalHysteresis: CGFloat = 12
     var horizontalSwipeThresholdFraction: CGFloat = 0.18
     var verticalDismissDistanceRatio: CGFloat = 0.5

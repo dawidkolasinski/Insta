@@ -13,7 +13,8 @@ import SwiftUI
 
 final class StoriesContainerViewModel: StoriesContainerViewModelProtocol {
     private let storiesFeed: StoriesFeedProtocol
-    let config: StoriesComponentConfig
+    let config: StoriesContainerConfig
+    private let autoConfig: StoryAutoAdvanceConfig
     
     @Published private(set) var currentStoryIndex: Int
     @Published private(set) var currentStoryViewModel: StoryViewModel
@@ -44,12 +45,13 @@ final class StoriesContainerViewModel: StoriesContainerViewModelProtocol {
     var stories: [StoryProtocol] { storiesFeed.stories }
     var currentStory: StoryProtocol { stories[safe: currentStoryIndex] ?? stories.first! }
 
-    init(feed: StoriesFeedProtocol, config: StoriesComponentConfig = .init()) {
+    init(feed: StoriesFeedProtocol, config: StoriesContainerConfig = .init(), autoConfig: StoryAutoAdvanceConfig = .init()) {
         self.storiesFeed = feed
         self.config = config
+        self.autoConfig = autoConfig
         let safeStartIndex = max(0, min(feed.startIndex, feed.stories.count - 1))
         self.currentStoryIndex = safeStartIndex
-        self.storyViewModelList = feed.stories.map { StoryViewModel(story: $0) }
+        self.storyViewModelList = feed.stories.map { StoryViewModel(story: $0, auto: autoConfig) }
 
         guard let initialStoryViewModel = storyViewModelList[safe: safeStartIndex] else {
             fatalError("StoriesContainerViewModel should not be initialized with empty stories array")
@@ -144,3 +146,4 @@ private extension StoryViewModel {
             .eraseToAnyPublisher()
     }
 }
+

@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-enum ImageSlidesStyle: Equatable {
+enum StoryImageStyle: Equatable {
     case card(aspectRatio: CGFloat = 9/16, cornerRadius: CGFloat = 16)
     case fullscreen(ignoreSafeAreas: Bool = true)
 }

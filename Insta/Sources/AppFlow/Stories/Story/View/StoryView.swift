@@ -20,10 +20,11 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     @State private var holdWorkItem: DispatchWorkItem?
 
     let onDismiss: (() -> Void)?
-    let style: ImageSlidesStyle
-    let holdConfig: HoldConfig
+    let style: StoryImageStyle
+    let holdConfig: StoriesContainerHoldConfig
     let topOverlayHeight: CGFloat
     let overrideTopSafeAreaInset: CGFloat?
+    let gestures: StoriesContainerGestureConfig
 
     private var isFullscreenIgnoringSafeAreas: Bool {
         if case let .fullscreen(ignoreSafeAreas) = style {
@@ -43,6 +44,12 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
             @unknown default: break
             }
         }
+        .onChange(of: viewModel.index) { _ in
+            let newID = viewModel.currentItem.id
+            if viewModel.cachedImage(for: newID) != nil {
+                viewModel.onCurrentItemLoaded()
+            }
+        }
         .onDisappear {
             holdWorkItem?.cancel()
             holdWorkItem = nil
@@ -57,10 +64,11 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     init(
         viewModel: ViewModel,
         onDismiss: (() -> Void)?,
-        style: ImageSlidesStyle,
-        holdConfig: HoldConfig,
+        style: StoryImageStyle,
+        holdConfig: StoriesContainerHoldConfig,
         topOverlayHeight: CGFloat,
         overrideTopSafeAreaInset: CGFloat? = nil,
+        gestures: StoriesContainerGestureConfig
     ) {
         self.viewModel = viewModel
         self.onDismiss = onDismiss
@@ -68,6 +76,7 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
         self.holdConfig = holdConfig
         self.topOverlayHeight = topOverlayHeight
         self.overrideTopSafeAreaInset = overrideTopSafeAreaInset
+        self.gestures = gestures
     }
 
     private var contentContainer: some View {
@@ -77,22 +86,27 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
             ZStack {
                 backgroundStyled
 
-                HStack(spacing: 0) {
+                if gestures.taps {
+                    HStack(spacing: 0) {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .highPriorityGesture(
+                                TapGesture().onEnded { handleTap(direction: .previous) }
+                            )
+                            .accessibilityLabel("Previous story")
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .highPriorityGesture(
+                                TapGesture().onEnded { handleTap(direction: .next) }
+                            )
+                            .accessibilityLabel("Next story")
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height)
+                } else {
                     Color.clear
-                        .contentShape(Rectangle())
-                        .highPriorityGesture(
-                            TapGesture().onEnded { handleTap(direction: .previous) }
-                        )
-                        .accessibilityLabel("Previous story")
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .highPriorityGesture(
-                            TapGesture().onEnded { handleTap(direction: .next) }
-                        )
-                        .accessibilityLabel("Next story")
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .allowsHitTesting(false)
                 }
-                .frame(width: geo.size.width, height: geo.size.height)
-                .simultaneousGesture(holdGesture)
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
@@ -110,6 +124,7 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                 topBarContent
                     .padding(.top, topInset + 12)
             }
+            .modifier(HoldGestureModifier(enabled: gestures.longPressPause, holdGesture: holdGesture))
         }
     }
 
@@ -165,11 +180,6 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                                 }
                         default:
                             Color.black
-                                .onAppear {
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                                        viewModel.onCurrentItemLoaded()
-                                    }
-                                }
                         }
                     }
                 }
@@ -278,5 +288,18 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
         guard !isHolding else { return }
         viewModel.pause(false)
         viewModel.advance(to: direction)
+    }
+}
+
+private struct HoldGestureModifier<G: Gesture>: ViewModifier {
+    let enabled: Bool
+    let holdGesture: G
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.simultaneousGesture(holdGesture)
+        } else {
+            content
+        }
     }
 }

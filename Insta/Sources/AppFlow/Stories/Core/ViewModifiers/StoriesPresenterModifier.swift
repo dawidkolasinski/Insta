@@ -11,7 +11,8 @@ struct StoriesPresenterModifier: ViewModifier {
     @Binding var isPresented: Bool
     var feed: StoriesFeedProtocol
     @Binding var dismissProgress: CGFloat
-    var config: StoriesComponentConfig
+    var config: StoriesContainerConfig
+    var autoConfig: StoryAutoAdvanceConfig = .init()
 
     private var isFullscreenIgnoringSafeAreas: Bool {
         if case let .fullscreen(ignore) = config.style {
@@ -37,7 +38,7 @@ struct StoriesPresenterModifier: ViewModifier {
                         // Wrapper ignorujący safe area od 1. klatki
                         ZStack {
                             StoriesContainerView(
-                                viewModel: StoriesContainerViewModel(feed: feed, config: config),
+                                viewModel: StoriesContainerViewModel(feed: feed, config: config, autoConfig: autoConfig),
                                 onDismiss: {
                                     withTransaction(Transaction(animation: nil)) { isPresented = false }
                                 },
@@ -61,8 +62,14 @@ extension View {
         isPresented: Binding<Bool>,
         feed: StoriesFeedProtocol,
         dismissProgress: Binding<CGFloat> = .constant(0),
-        config: StoriesComponentConfig = .init()
+        config: StoriesContainerConfig = .init(),
+        autoConfig: StoryAutoAdvanceConfig = .init()
     ) -> some View {
-        modifier(StoriesPresenterModifier(isPresented: isPresented, feed: feed, dismissProgress: dismissProgress, config: config))
+        modifier(StoriesPresenterModifier(isPresented: isPresented,
+                                          feed: feed,
+                                          dismissProgress: dismissProgress,
+                                          config: config,
+                                          autoConfig: autoConfig))
     }
 }
+

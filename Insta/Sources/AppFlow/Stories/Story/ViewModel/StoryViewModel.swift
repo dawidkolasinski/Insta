@@ -7,6 +7,7 @@
 
 import Combine
 import SwiftUI
+import UIKit
 
 final class StoryViewModel: StoryViewModelProtocol {
     private let autoAdvanceConfig: StoryAutoAdvanceConfig
@@ -23,6 +24,7 @@ final class StoryViewModel: StoryViewModelProtocol {
     @Published private(set) var requestPrevStory: Bool = false
 
     private var timerRef: Timer?
+    private var inFlightPrefetch: Set<String> = []
 
     var currentItem: StoryItemProtocol {
         items[safe: index]
@@ -38,6 +40,9 @@ final class StoryViewModel: StoryViewModelProtocol {
         self.didFinish = false
         self.requestPrevStory = false
         self.isCurrentItemLoaded = false
+
+        // Prefetch bieżącego i sąsiadów na start.
+        preloadAround(index: self.index)
     }
 
     deinit { stop() }
@@ -55,12 +60,16 @@ final class StoryViewModel: StoryViewModelProtocol {
         self.didFinish = false
         self.requestPrevStory = false
         self.isCurrentItemLoaded = false
+
+        // Prefetch po załadowaniu nowej historii.
+        preloadAround(index: self.index)
     }
 
     func start() {
+        // Timer startuje tylko gdy bieżący item jest załadowany.
         stop()
         progress = 0
-        guard autoAdvanceConfig.enabled, !items.isEmpty else { return }
+        guard autoAdvanceConfig.enabled, !items.isEmpty, isCurrentItemLoaded else { return }
 
         let schedule = {
             let localTimer = Timer.scheduledTimer(withTimeInterval: self.autoAdvanceConfig.tick, repeats: true) { [weak self] _ in
@@ -73,11 +82,11 @@ final class StoryViewModel: StoryViewModelProtocol {
                     if self.index < self.items.count - 1 {
                         self.index += 1
                         self.isCurrentItemLoaded = false
-                        self.scheduleLoadFallback()
+                        self.preloadAround(index: self.index)
                     } else if self.autoAdvanceConfig.loops {
                         self.index = 0
                         self.isCurrentItemLoaded = false
-                        self.scheduleLoadFallback()
+                        self.preloadAround(index: self.index)
                     } else {
                         self.markDidFinish()
                         self.stop()
@@ -103,11 +112,11 @@ final class StoryViewModel: StoryViewModelProtocol {
         if index < items.count - 1 {
             index += 1
             isCurrentItemLoaded = false
-            scheduleLoadFallback()
+            preloadAround(index: index)
         } else if autoAdvanceConfig.loops {
             index = 0
             isCurrentItemLoaded = false
-            scheduleLoadFallback()
+            preloadAround(index: index)
         } else {
             markDidFinish()
             stop()
@@ -119,11 +128,11 @@ final class StoryViewModel: StoryViewModelProtocol {
         if index > 0 {
             index -= 1
             isCurrentItemLoaded = false
-            scheduleLoadFallback()
+            preloadAround(index: index)
         } else if autoAdvanceConfig.loops {
             index = max(0, items.count - 1)
             isCurrentItemLoaded = false
-            scheduleLoadFallback()
+            preloadAround(index: index)
         } else {
             requestPrev()
         }
@@ -137,8 +146,12 @@ final class StoryViewModel: StoryViewModelProtocol {
     }
 
     func onCurrentItemLoaded() {
+        // Ustawiamy flagę dopiero po realnym załadowaniu obrazka (z cache lub sukces AsyncImage).
         isCurrentItemLoaded = true
+        // Timer startuje dopiero teraz, jeśli nie istnieje.
         if timerRef == nil { start() }
+        // Prefetch na wszelki wypadek.
+        preloadAround(index: index)
     }
 
     func pause(_ value: Bool) { isPaused = value }
@@ -152,11 +165,43 @@ final class StoryViewModel: StoryViewModelProtocol {
     func requestPrev() { requestPrevStory = true }
     func clearRequestPrev() { requestPrevStory = false }
 
-    private func scheduleLoadFallback() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-            guard let strongSelf = self else { return }
-            guard strongSelf.timerRef != nil, strongSelf.isCurrentItemLoaded == false else { return }
-            strongSelf.onCurrentItemLoaded()
+    // MARK: - Prefetch
+
+    private func preloadAround(index: Int) {
+        let candidates: [StoryItemProtocol] = [
+            items[safe: index],
+            items[safe: index - 1],
+            items[safe: index + 1]
+        ].compactMap { $0 }
+
+        for item in candidates {
+            prefetch(item: item)
+        }
+    }
+
+    private func prefetch(item: StoryItemProtocol) {
+        let id = item.id
+        guard imageCache[id] == nil else { return }
+        guard let url = item.imageURL else { return }
+        guard !inFlightPrefetch.contains(id) else { return }
+
+        inFlightPrefetch.insert(id)
+
+        Task.detached(priority: .utility) { [weak self] in
+            defer { Task { [weak self] in self?.inFlightPrefetch.remove(id) } }
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                guard let uiImage = UIImage(data: data) else { return }
+                let image = Image(uiImage: uiImage)
+                await MainActor.run {
+                    self?.store(image: image, for: id)
+                    if let strongSelf = self, strongSelf.currentItem.id == id, strongSelf.isCurrentItemLoaded == false {
+                        strongSelf.onCurrentItemLoaded()
+                    }
+                }
+            } catch {
+                // Ignorujemy błędy – nie oznaczamy loaded, timer nie wystartuje "na niby".
+            }
         }
     }
 }

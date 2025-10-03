@@ -63,6 +63,7 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
                             holdConfig: containerViewModel.config.hold,
                             topOverlayHeight: containerViewModel.config.topOverlayHeight,
                             overrideTopSafeAreaInset: topSafeAreaInset,
+                            gestures: containerViewModel.config.gestures
                         )
                         .offset(x: horizontalDrag - effectiveWidth)
                         .opacity(showNeighbors ? 1 : 0)
@@ -78,6 +79,7 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
                             holdConfig: containerViewModel.config.hold,
                             topOverlayHeight: containerViewModel.config.topOverlayHeight,
                             overrideTopSafeAreaInset: topSafeAreaInset,
+                            gestures: containerViewModel.config.gestures
                         )
                         .offset(x: horizontalDrag + effectiveWidth)
                         .opacity(showNeighbors ? 1 : 0)
@@ -92,6 +94,7 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
                         holdConfig: containerViewModel.config.hold,
                         topOverlayHeight: containerViewModel.config.topOverlayHeight,
                         overrideTopSafeAreaInset: topSafeAreaInset,
+                        gestures: containerViewModel.config.gestures
                     )
                     .offset(x: horizontalDrag)
                     .zIndex(1)
@@ -275,8 +278,8 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
                 let overscrollMissingNeighbor = (deltaX > 0 && isAtFirst) || (deltaX < 0 && isAtLast)
 
                 if activeDragAxis == .none {
-                    let canH = containerViewModel.config.containerGestures.horizontalSwipes
-                    let canV = containerViewModel.config.containerGestures.verticalDismiss
+                    let canH = containerViewModel.config.gestures.horizontalSwipes
+                    let canV = containerViewModel.config.gestures.verticalDismiss
                     if overscrollMissingNeighbor, canV {
                         beginVerticalDragFromHorizontal(deltaX: deltaX, deltaY: deltaY)
                     } else if canH, abs(deltaX) > abs(deltaY) + hysteresis {
@@ -284,7 +287,7 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
                     } else if canV, abs(deltaY) > abs(deltaX) + hysteresis {
                         beginVerticalDragFromVertical(deltaX: deltaX)
                     }
-                } else if activeDragAxis == .horizontal, overscrollMissingNeighbor, containerViewModel.config.containerGestures.verticalDismiss {
+                } else if activeDragAxis == .horizontal, overscrollMissingNeighbor, containerViewModel.config.gestures.verticalDismiss {
                     beginVerticalDragFromHorizontal(deltaX: deltaX, deltaY: deltaY)
                 }
 
@@ -294,7 +297,7 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
 
                 switch activeDragAxis {
                 case .horizontal:
-                    guard containerViewModel.config.containerGestures.horizontalSwipes else { return }
+                    guard containerViewModel.config.gestures.horizontalSwipes else { return }
                     if overscrollMissingNeighbor {
                         let rubber: CGFloat = 0.15
                         horizontalDrag = deltaX * rubber
@@ -306,7 +309,7 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
                         dismissProgress = 0
                     }
                 case .vertical:
-                    guard containerViewModel.config.containerGestures.verticalDismiss else { return }
+                    guard containerViewModel.config.gestures.verticalDismiss else { return }
                     let rawY = verticalBaseOffset + (deltaY - verticalBaseDY)
                     verticalDrag = max(0, rawY)
                     let factor = max(0, containerViewModel.config.physics.overscrollHorizontalDriftFactor)
@@ -329,8 +332,8 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
 
                 let threshold: CGFloat = max(60, containerWidth * containerViewModel.config.physics.horizontalSwipeThresholdFraction)
 
-                if (endAxis == .vertical && containerViewModel.config.containerGestures.verticalDismiss) ||
-                    (overscrollMissingNeighbor && containerViewModel.config.containerGestures.verticalDismiss) {
+                if (endAxis == .vertical && containerViewModel.config.gestures.verticalDismiss) ||
+                    (overscrollMissingNeighbor && containerViewModel.config.gestures.verticalDismiss) {
 
                     let endVertical = max(0, verticalBaseOffset + (endVerticalFromY - verticalBaseDY))
                     let projectedVertical = max(0, verticalBaseOffset + (value.predictedEndTranslation.height - verticalBaseDY))
@@ -392,7 +395,7 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
                     return
                 }
 
-                if endAxis == .horizontal, containerViewModel.config.containerGestures.horizontalSwipes {
+                if endAxis == .horizontal, containerViewModel.config.gestures.horizontalSwipes {
                     if deltaX <= -threshold, containerViewModel.currentStoryIndex + 1 < containerViewModel.stories.count {
                         performHorizontalSwitch(.next)
                         resetDragAxisState()
