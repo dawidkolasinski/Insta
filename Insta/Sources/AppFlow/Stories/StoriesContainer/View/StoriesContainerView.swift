@@ -31,6 +31,7 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
 
     private let onDismiss: (() -> Void)?
     private let topSafeAreaInset: CGFloat
+    private let persistence: PersistenceStore
 
     var body: some View {
         GeometryReader { geo in
@@ -64,6 +65,7 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
                             topOverlayHeight: containerViewModel.config.topOverlayHeight,
                             overrideTopSafeAreaInset: topSafeAreaInset,
                             gestures: containerViewModel.config.gestures,
+                            persistence: persistence
                         )
                         .offset(x: horizontalDrag - effectiveWidth)
                         .opacity(showNeighbors ? 1 : 0)
@@ -79,7 +81,8 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
                             holdConfig: containerViewModel.config.hold,
                             topOverlayHeight: containerViewModel.config.topOverlayHeight,
                             overrideTopSafeAreaInset: topSafeAreaInset,
-                            gestures: containerViewModel.config.gestures
+                            gestures: containerViewModel.config.gestures,
+                            persistence: persistence
                         )
                         .offset(x: horizontalDrag + effectiveWidth)
                         .opacity(showNeighbors ? 1 : 0)
@@ -94,7 +97,8 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
                         holdConfig: containerViewModel.config.hold,
                         topOverlayHeight: containerViewModel.config.topOverlayHeight,
                         overrideTopSafeAreaInset: topSafeAreaInset,
-                        gestures: containerViewModel.config.gestures
+                        gestures: containerViewModel.config.gestures,
+                        persistence: persistence
                     )
                     .offset(x: horizontalDrag)
                     .zIndex(1)
@@ -135,11 +139,13 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
         viewModel: @autoclosure @escaping () -> ViewModel,
         onDismiss: (() -> Void)? = nil,
         dismissProgress: Binding<CGFloat> = .constant(0),
-        topSafeAreaInset: CGFloat
+        topSafeAreaInset: CGFloat,
+        persistence: PersistenceStore
     ) {
         self.onDismiss = onDismiss
         self._dismissProgress = dismissProgress
         self.topSafeAreaInset = topSafeAreaInset
+        self.persistence = persistence
         _containerViewModel = StateObject(wrappedValue: viewModel())
     }
 

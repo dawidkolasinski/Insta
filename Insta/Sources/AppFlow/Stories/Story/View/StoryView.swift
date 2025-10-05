@@ -1,5 +1,11 @@
-import SwiftUI
+//
+//  StoryView.swift
+//  Insta
+//
+//  Created by Dawid Kolasinski on 30/09/2025.
+
 import Combine
+import SwiftUI
 
 enum StoryAdvanceDirection {
     case previous
@@ -13,8 +19,9 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     @State private var isHolding: Bool = false
     @State private var holdWorkItem: DispatchWorkItem?
     @State private var messageText: String = ""
-    @State private var isLiked: Bool = false
     @State private var avatarFrameGlobal: CGRect? = nil
+
+    private let persistence: PersistenceStore
 
     let onDismiss: (() -> Void)?
     let style: StoryImageStyle
@@ -35,9 +42,13 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack {
             contentContainer
+            interfaceOverlay
+                .opacity(isHolding ? 0 : 1)
+                .animation(.easeInOut(duration: 0.22), value: isHolding)
         }
+        .modifier(HoldGestureModifier(enabled: gestures.longPressPause, holdGesture: holdGesture))
         .overlay {
             if isInputFocused {
                 Color.black.opacity(0.5)
@@ -65,7 +76,6 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
             }
             withAnimation(.easeInOut(duration: 0.22)) {
                 messageText = ""
-                isLiked = false
                 isInputFocused = false
             }
         }
@@ -78,59 +88,12 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                 viewModel.pause(false)
             }
         }
-        .overlay(alignment: .bottom) {
-            VStack(spacing: 0) {
-                Spacer(minLength: 0)
-                ZStack {
-                    if isInputFocused && messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        quickReactionsView
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                            .zIndex(2)
-                            .animation(.easeInOut(duration: 0.25), value: isInputFocused)
-                    }
-                }
-                Spacer(minLength: 0)
-                bottomBar
-            }
-        }
-    }
-    
-    private func dismissKeyboard() {
-        withAnimation(.easeInOut(duration: 0.22)) {
-            isInputFocused = false
-        }
     }
 
-    init(
-        viewModel: ViewModel,
-        onDismiss: (() -> Void)?,
-        style: StoryImageStyle,
-        holdConfig: StoriesContainerHoldConfig,
-        topOverlayHeight: CGFloat,
-        overrideTopSafeAreaInset: CGFloat? = nil,
-        gestures: StoriesContainerGestureConfig,
-        onLike: ((StoryItemProtocol, Bool) -> Void)? = nil,
-        onSend: ((StoryItemProtocol, String) -> Void)? = nil,
-        onReaction: ((StoryItemProtocol, String) -> Void)? = nil
-    ) {
-        self.viewModel = viewModel
-        self.onDismiss = onDismiss
-        self.style = style
-        self.holdConfig = holdConfig
-        self.topOverlayHeight = topOverlayHeight
-        self.overrideTopSafeAreaInset = overrideTopSafeAreaInset
-        self.gestures = gestures
-        self.onLike = onLike
-        self.onSend = onSend
-        self.onReaction = onReaction
-    }
-
-    private var contentContainer: some View {
+    private var interfaceOverlay: some View {
         GeometryReader { geo in
             let topInset = isFullscreenIgnoringSafeAreas ? (overrideTopSafeAreaInset ?? UIWindow.topSafeAreaInset) : 0
             ZStack {
-                backgroundStyled
-
                 if gestures.taps {
                     HStack(spacing: 0) {
                         Color.clear
@@ -148,24 +111,78 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                     }
                     .frame(width: geo.size.width, height: geo.size.height)
                 }
+
+                VStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [Color.black.opacity(0.55), Color.black.opacity(0.0)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: topOverlayHeight + topInset + 10)
+                    .allowsHitTesting(false)
+                    .ignoresSafeArea(edges: .top)
+                    .overlay(alignment: .top) {
+                        topBarContent
+                            .padding(.top, topInset + 12)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .frame(maxHeight: .infinity, alignment: .top)
+
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    ZStack {
+                        if isInputFocused && messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            quickReactionsView
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                                .zIndex(2)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    bottomBar
+                }
+                .frame(maxHeight: .infinity, alignment: .bottom)
             }
             .frame(width: geo.size.width, height: geo.size.height)
-            .clipped()
-            .overlay(alignment: .top) {
-                LinearGradient(
-                    colors: [Color.black.opacity(0.55), Color.black.opacity(0.0)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: topOverlayHeight + topInset)
-                .allowsHitTesting(false)
-                .ignoresSafeArea(edges: .top)
-            }
-            .overlay(alignment: .top) {
-                topBarContent
-                    .padding(.top, topInset + 12)
-            }
-            .modifier(HoldGestureModifier(enabled: gestures.longPressPause, holdGesture: holdGesture))
+        }
+    }
+
+    private func dismissKeyboard() {
+        withAnimation(.easeInOut(duration: 0.22)) {
+            isInputFocused = false
+        }
+    }
+
+    init(
+        viewModel: ViewModel,
+        onDismiss: (() -> Void)?,
+        style: StoryImageStyle,
+        holdConfig: StoriesContainerHoldConfig,
+        topOverlayHeight: CGFloat,
+        overrideTopSafeAreaInset: CGFloat? = nil,
+        gestures: StoriesContainerGestureConfig,
+        persistence: PersistenceStore,
+        onLike: ((StoryItemProtocol, Bool) -> Void)? = nil,
+        onSend: ((StoryItemProtocol, String) -> Void)? = nil,
+        onReaction: ((StoryItemProtocol, String) -> Void)? = nil
+    ) {
+        self.viewModel = viewModel
+        self.onDismiss = onDismiss
+        self.style = style
+        self.holdConfig = holdConfig
+        self.topOverlayHeight = topOverlayHeight
+        self.overrideTopSafeAreaInset = overrideTopSafeAreaInset
+        self.gestures = gestures
+        self.persistence = persistence
+        self.onLike = onLike
+        self.onSend = onSend
+        self.onReaction = onReaction
+    }
+    private var contentContainer: some View {
+        GeometryReader { geo in
+            backgroundStyled
+                .frame(width: geo.size.width, height: geo.size.height)
+                .clipped()
         }
     }
 
@@ -271,7 +288,7 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                 Spacer()
                 Button(action: { onDismiss?() }) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 24, weight: .bold))
+                        .font(.system(size: 24, weight: .regular))
                         .foregroundColor(.white)
                         .padding(8)
                 }
@@ -369,7 +386,7 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     private var bottomBar: some View {
         StoryBottomBarView(
             text: $messageText,
-            isLiked: $isLiked,
+            isLiked: .constant(persistence.isLiked(viewModel.currentItem.id)),
             quickReactions: quickReactions,
             onFocusChanged: { focused in
                 if focused {
@@ -394,8 +411,8 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                 dismissKeyboard()
             },
             onLike: {
-                isLiked.toggle()
-                onLike?(viewModel.currentItem, isLiked)
+                persistence.toggleLike(viewModel.currentItem.id)
+                onLike?(viewModel.currentItem, persistence.isLiked(viewModel.currentItem.id))
             },
             onReaction: { emoji in
                 onReaction?(viewModel.currentItem, emoji)
@@ -427,13 +444,3 @@ private struct HoldGestureModifier<G: Gesture>: ViewModifier {
         }
     }
 }
-
-import UIKit
-struct BlurView: UIViewRepresentable {
-    var style: UIBlurEffect.Style
-    func makeUIView(context: Context) -> UIVisualEffectView {
-        UIVisualEffectView(effect: UIBlurEffect(style: style))
-    }
-    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {}
-}
-

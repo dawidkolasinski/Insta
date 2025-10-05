@@ -1,3 +1,9 @@
+//
+//  StoryBottomBar.swift
+//  Insta
+//
+//  Created by Dawid Kolasinski on 30/09/2025.
+
 import SwiftUI
 
 struct StoryBottomBarView: View {
@@ -82,6 +88,6 @@ struct StoryBottomBarView: View {
             }
         }
         .padding(.horizontal, 4)
-        .animation(.easeInOut(duration: 0.22), value: isFocused) // globalna animacja dla całego HStack
+        .animation(.easeInOut(duration: 0.22), value: isFocused)
     }
 }

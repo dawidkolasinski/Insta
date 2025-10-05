@@ -13,6 +13,7 @@ struct StoriesPresenterModifier: ViewModifier {
     @Binding var dismissProgress: CGFloat
     var config: StoriesContainerConfig
     var autoConfig: StoryAutoAdvanceConfig = .init()
+    var persistence: PersistenceStore
 
     private var isFullscreenIgnoringSafeAreas: Bool {
         if case let .fullscreen(ignore) = config.style {
@@ -43,7 +44,8 @@ struct StoriesPresenterModifier: ViewModifier {
                                     withTransaction(Transaction(animation: nil)) { isPresented = false }
                                 },
                                 dismissProgress: $dismissProgress,
-                                topSafeAreaInset: deviceTopInset
+                                topSafeAreaInset: deviceTopInset,
+                                persistence: persistence
                             )
                             .transition(.storiesDeck)
                         }
@@ -63,13 +65,14 @@ extension View {
         feed: StoriesFeedProtocol,
         dismissProgress: Binding<CGFloat> = .constant(0),
         config: StoriesContainerConfig = .init(),
-        autoConfig: StoryAutoAdvanceConfig = .init()
+        autoConfig: StoryAutoAdvanceConfig = .init(),
+        persistence: PersistenceStore = PersistenceStore()
     ) -> some View {
         modifier(StoriesPresenterModifier(isPresented: isPresented,
                                           feed: feed,
                                           dismissProgress: dismissProgress,
                                           config: config,
-                                          autoConfig: autoConfig))
+                                          autoConfig: autoConfig,
+                                          persistence: persistence))
     }
 }
-
