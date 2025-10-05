@@ -1,10 +1,3 @@
-//
-//  StoryView.swift
-//  Insta
-//
-//  Created by Dawid Kolasinski on 27/09/2025.
-//
-
 import SwiftUI
 import Combine
 
@@ -18,6 +11,9 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     @ObservedObject private var viewModel: ViewModel
     @State private var isHolding: Bool = false
     @State private var holdWorkItem: DispatchWorkItem?
+    @State private var messageText: String = ""
+    @FocusState private var isInputFocused: Bool
+    @State private var isLiked: Bool = false
 
     let onDismiss: (() -> Void)?
     let style: StoryImageStyle
@@ -25,6 +21,10 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     let topOverlayHeight: CGFloat
     let overrideTopSafeAreaInset: CGFloat?
     let gestures: StoriesContainerGestureConfig
+    let onLike: ((StoryItemProtocol, Bool) -> Void)?
+    let onSend: ((StoryItemProtocol, String) -> Void)?
+    let onReaction: ((StoryItemProtocol, String) -> Void)?
+    private let quickReactions = ["😂", "😮", "😍", "🥲", "👏", "🔥"]
 
     private var isFullscreenIgnoringSafeAreas: Bool {
         if case let .fullscreen(ignoreSafeAreas) = style {
@@ -37,6 +37,19 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
         VStack(spacing: 0) {
             contentContainer
         }
+        .overlay {
+            if isInputFocused {
+                Color.black.opacity(0.5)
+                    .onTapGesture {
+                        withAnimation(.easeInOut(duration: 0.22)) {
+                            isInputFocused = false
+                        }
+                        dismissKeyboard()
+                    }
+                    .transition(.opacity)
+            }
+        }
+        .ignoresSafeArea(.keyboard)
         .onChange(of: scenePhase) { phase in
             switch phase {
             case .active: viewModel.pause(false)
@@ -49,6 +62,9 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
             if viewModel.cachedImage(for: newID) != nil {
                 viewModel.onCurrentItemLoaded()
             }
+            messageText = ""
+            isLiked = false
+            isInputFocused = false
         }
         .onDisappear {
             holdWorkItem?.cancel()
@@ -59,6 +75,28 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                 viewModel.pause(false)
             }
         }
+        .overlay(alignment: .bottom) {
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                ZStack {
+                    if isInputFocused && messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        quickReactionsView
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .padding(.bottom, 16)
+                            .zIndex(2)
+                            .animation(.easeInOut(duration: 0.25), value: isInputFocused && messageText.isEmpty)
+                    }
+                }
+                Spacer(minLength: 0)
+                bottomBar
+            }
+        }
+    }
+    
+    private func dismissKeyboard() {
+    #if canImport(UIKit)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    #endif
     }
 
     init(
@@ -68,7 +106,10 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
         holdConfig: StoriesContainerHoldConfig,
         topOverlayHeight: CGFloat,
         overrideTopSafeAreaInset: CGFloat? = nil,
-        gestures: StoriesContainerGestureConfig
+        gestures: StoriesContainerGestureConfig,
+        onLike: ((StoryItemProtocol, Bool) -> Void)? = nil,
+        onSend: ((StoryItemProtocol, String) -> Void)? = nil,
+        onReaction: ((StoryItemProtocol, String) -> Void)? = nil
     ) {
         self.viewModel = viewModel
         self.onDismiss = onDismiss
@@ -77,12 +118,14 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
         self.topOverlayHeight = topOverlayHeight
         self.overrideTopSafeAreaInset = overrideTopSafeAreaInset
         self.gestures = gestures
+        self.onLike = onLike
+        self.onSend = onSend
+        self.onReaction = onReaction
     }
 
     private var contentContainer: some View {
         GeometryReader { geo in
             let topInset = isFullscreenIgnoringSafeAreas ? (overrideTopSafeAreaInset ?? UIWindow.topSafeAreaInset) : 0
-
             ZStack {
                 backgroundStyled
 
@@ -208,6 +251,12 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
             HStack(spacing: 12) {
                 if let avatar = viewModel.story.user.avatarURL {
                     StoryAvatarView(url: avatar, seen: false, displayedPlace: .storyDetail)
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear
+                                    .preference(key: AvatarFramePreferenceKey.self, value: geo.frame(in: .global))
+                            }
+                        )
                 } else {
                     Image(systemName: "person.crop.circle.fill")
                         .foregroundStyle(.white)
@@ -223,14 +272,16 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                 Spacer()
                 Button(action: { onDismiss?() }) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 14, weight: .bold))
+                        .font(.system(size: 24, weight: .bold))
                         .foregroundColor(.white)
                         .padding(8)
-                        .background(Color.black.opacity(0.55), in: Circle())
                 }
                 .accessibilityLabel("Close")
             }
             .padding(.horizontal)
+        }
+        .onPreferenceChange(AvatarFramePreferenceKey.self) { value in
+            self.avatarFrameGlobal = value
         }
     }
 
@@ -289,6 +340,121 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
         viewModel.pause(false)
         viewModel.advance(to: direction)
     }
+    @State private var avatarFrameGlobal: CGRect? = nil
+
+    // PRZYWRÓCONA, UPROSZCZONA WERSJA
+    private var quickReactionsView: some View {
+        let columns = [
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10)
+        ]
+        return LazyVGrid(columns: columns, spacing: 18) {
+            ForEach(Array(quickReactions.enumerated()), id: \.offset) { idx, emoji in
+                Button {
+                    onReaction?(viewModel.currentItem, emoji)
+                    #if canImport(UIKit)
+                    let impact = UIImpactFeedbackGenerator(style: .light)
+                    impact.impactOccurred()
+                    #endif
+                } label: {
+                    Text(emoji)
+                        .font(.system(size: 44))
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .background(Color.black.opacity(0.17), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .frame(height: 62)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 26)
+    }
+
+    // MARK: - Bottom Bar
+
+    private var bottomBar: some View {
+        StoryBottomBarView(
+            text: $messageText,
+            isLiked: $isLiked,
+            quickReactions: quickReactions,
+            onFocusChanged: { focused in
+                if focused {
+                    viewModel.pause(true)
+                    viewModel.hold(true)
+                } else {
+                    viewModel.hold(false)
+                    viewModel.pause(false)
+                }
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    isInputFocused = focused
+                }
+            },
+            onSend: {
+                let trimmed = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return }
+                onSend?(viewModel.currentItem, trimmed)
+                messageText = ""
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    isInputFocused = false
+                }
+                dismissKeyboard()
+            },
+            onLike: {
+                isLiked.toggle()
+                onLike?(viewModel.currentItem, isLiked)
+            },
+            onReaction: { emoji in
+                onReaction?(viewModel.currentItem, emoji)
+            }
+        )
+        .focused($isInputFocused)
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+    }
+}
+
+// MARK: - EmojiFlyAnimationView
+
+private struct EmojiFlyAnimationView: View {
+    let emoji: String
+    let from: CGRect
+    let to: CGRect
+    let progress: CGFloat
+
+    var currentPosition: CGPoint {
+        CGPoint(
+            x: from.origin.x + (to.midX - from.midX) * progress,
+            y: from.origin.y + (to.midY - from.midY) * progress - 36 * progress // lekki łuk w górę
+        )
+    }
+
+    var currentScale: CGFloat {
+        1 + (0.8 - 1) * progress
+    }
+
+    var opacity: Double {
+        Double(1 - progress * 0.30)
+    }
+
+    var body: some View {
+        Text(emoji)
+            .font(.system(size: 44))
+            .scaleEffect(currentScale)
+            .opacity(opacity)
+            .position(currentPosition)
+            .animation(nil, value: progress) // pozycja kontrolowana przez binding
+    }
+}
+
+// MARK: - AvatarFramePreferenceKey
+
+private struct AvatarFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect? = nil
+    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) {
+        value = nextValue() ?? value
+    }
 }
 
 private struct HoldGestureModifier<G: Gesture>: ViewModifier {
@@ -303,3 +469,13 @@ private struct HoldGestureModifier<G: Gesture>: ViewModifier {
         }
     }
 }
+
+import UIKit
+struct BlurView: UIViewRepresentable {
+    var style: UIBlurEffect.Style
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        UIVisualEffectView(effect: UIBlurEffect(style: style))
+    }
+    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {}
+}
+

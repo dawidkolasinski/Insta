@@ -26,6 +26,9 @@ final class StoriesContainerViewModel: StoriesContainerViewModelProtocol {
     private var storyViewModelList: [StoryViewModel] = []
     private var subscriptions: Set<AnyCancellable> = []
 
+    var stories: [StoryProtocol] { storiesFeed.stories }
+    var currentStory: StoryProtocol { stories[safe: currentStoryIndex] ?? stories.first! }
+
     var dismissRequested: AnyPublisher<Void, Never> {
         dismissRequestedSubject.eraseToAnyPublisher()
     }
@@ -35,15 +38,12 @@ final class StoriesContainerViewModel: StoriesContainerViewModelProtocol {
     var nextStoryRequested: AnyPublisher<Void, Never> {
         nextStoryRequestedSubject.eraseToAnyPublisher()
     }
-
     var previousStoryViewModel: StoryViewModel? {
         storyViewModelList[safe: currentStoryIndex - 1]
     }
     var nextStoryViewModel: StoryViewModel? {
         storyViewModelList[safe: currentStoryIndex + 1]
     }
-    var stories: [StoryProtocol] { storiesFeed.stories }
-    var currentStory: StoryProtocol { stories[safe: currentStoryIndex] ?? stories.first! }
 
     init(feed: StoriesFeedProtocol, config: StoriesContainerConfig = .init(), autoConfig: StoryAutoAdvanceConfig = .init()) {
         self.storiesFeed = feed
@@ -146,4 +146,3 @@ private extension StoryViewModel {
             .eraseToAnyPublisher()
     }
 }
-

@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct StoriesContainerConfig: Equatable {
-    var style: StoryImageStyle = .fullscreen(ignoreSafeAreas: true)
+    var style: StoryImageStyle = .card()
     var gestures: StoriesContainerGestureConfig = .allEnabled
     var hold: StoriesContainerHoldConfig = .init()
     var physics: StoriesContainerPhysicsConfig = .init()
