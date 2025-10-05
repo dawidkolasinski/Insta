@@ -183,24 +183,32 @@ final class StoryViewModel: StoryViewModelProtocol {
         let id = item.id
         guard imageCache[id] == nil else { return }
         guard let url = item.imageURL else { return }
-        guard !inFlightPrefetch.contains(id) else { return }
 
-        inFlightPrefetch.insert(id)
+        // Make guard/insert atomic and main-actor isolated
+        Task { @MainActor in
+            guard !inFlightPrefetch.contains(id) else { return }
+            inFlightPrefetch.insert(id)
 
-        Task.detached(priority: .utility) { [weak self] in
-            defer { Task { [weak self] in self?.inFlightPrefetch.remove(id) } }
-            do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                guard let uiImage = UIImage(data: data) else { return }
-                let image = Image(uiImage: uiImage)
-                await MainActor.run {
-                    self?.store(image: image, for: id)
-                    if let strongSelf = self, strongSelf.currentItem.id == id, strongSelf.isCurrentItemLoaded == false {
-                        strongSelf.onCurrentItemLoaded()
+            // Start background prefetch task once we've inserted
+            Task.detached(priority: .utility) { [weak self] in
+                defer {
+                    Task { @MainActor in
+                        self?.inFlightPrefetch.remove(id)
                     }
                 }
-            } catch {
-                // Ignorujemy błędy – nie oznaczamy loaded, timer nie wystartuje "na niby".
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: url)
+                    guard let uiImage = UIImage(data: data) else { return }
+                    let image = Image(uiImage: uiImage)
+                    await MainActor.run {
+                        self?.store(image: image, for: id)
+                        if let strongSelf = self, strongSelf.currentItem.id == id, strongSelf.isCurrentItemLoaded == false {
+                            strongSelf.onCurrentItemLoaded()
+                        }
+                    }
+                } catch {
+                    // Ignorujemy błędy – nie oznaczamy loaded, timer nie wystartuje "na niby".
+                }
             }
         }
     }

@@ -15,6 +15,14 @@ struct StoryBottomBarView: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            if !isFocused {
+                Image(systemName: "message")
+                    .foregroundColor(.white)
+                    .font(.system(size: 20, weight: .regular))
+                    .padding(.leading, 4)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+
             TextField(
                 "",
                 text: $text,
@@ -27,7 +35,9 @@ struct StoryBottomBarView: View {
             .background(Color.clear, in: Capsule())
             .focused($isFocused)
             .onChange(of: isFocused) { focused in
-                onFocusChanged(focused)
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    onFocusChanged(focused)
+                }
             }
             .submitLabel(.send)
             .onSubmit {
@@ -38,7 +48,7 @@ struct StoryBottomBarView: View {
                     .strokeBorder(Color.white)
             }
 
-            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if !isFocused {
                 Button {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
                         isLiked.toggle()
@@ -57,19 +67,21 @@ struct StoryBottomBarView: View {
                         .scaleEffect(heartScale)
                 }
                 .accessibilityLabel(isLiked ? "Unlike" : "Like")
-            } else {
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+
                 Button {
                     onSend()
                 } label: {
-                    Image(systemName: "paperplane.fill")
-                        .foregroundColor(.white)
+                    Image(systemName: "paperplane")
+                        .foregroundStyle(.white)
                         .font(.system(size: 18, weight: .semibold))
-                        .padding(10)
-                        .background(Color.blue.opacity(0.9), in: Circle())
                 }
                 .accessibilityLabel("Send")
+                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
         .padding(.horizontal, 4)
+        .animation(.easeInOut(duration: 0.22), value: isFocused) // globalna animacja dla całego HStack
     }
 }

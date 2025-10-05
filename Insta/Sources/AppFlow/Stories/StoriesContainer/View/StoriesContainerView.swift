@@ -63,7 +63,7 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
                             holdConfig: containerViewModel.config.hold,
                             topOverlayHeight: containerViewModel.config.topOverlayHeight,
                             overrideTopSafeAreaInset: topSafeAreaInset,
-                            gestures: containerViewModel.config.gestures
+                            gestures: containerViewModel.config.gestures,
                         )
                         .offset(x: horizontalDrag - effectiveWidth)
                         .opacity(showNeighbors ? 1 : 0)

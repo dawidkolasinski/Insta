@@ -9,11 +9,12 @@ enum StoryAdvanceDirection {
 struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var viewModel: ViewModel
+    @FocusState private var isInputFocused: Bool
     @State private var isHolding: Bool = false
     @State private var holdWorkItem: DispatchWorkItem?
     @State private var messageText: String = ""
-    @FocusState private var isInputFocused: Bool
     @State private var isLiked: Bool = false
+    @State private var avatarFrameGlobal: CGRect? = nil
 
     let onDismiss: (() -> Void)?
     let style: StoryImageStyle
@@ -62,9 +63,11 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
             if viewModel.cachedImage(for: newID) != nil {
                 viewModel.onCurrentItemLoaded()
             }
-            messageText = ""
-            isLiked = false
-            isInputFocused = false
+            withAnimation(.easeInOut(duration: 0.22)) {
+                messageText = ""
+                isLiked = false
+                isInputFocused = false
+            }
         }
         .onDisappear {
             holdWorkItem?.cancel()
@@ -82,9 +85,8 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                     if isInputFocused && messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         quickReactionsView
                             .transition(.move(edge: .bottom).combined(with: .opacity))
-                            .padding(.bottom, 16)
                             .zIndex(2)
-                            .animation(.easeInOut(duration: 0.25), value: isInputFocused && messageText.isEmpty)
+                            .animation(.easeInOut(duration: 0.25), value: isInputFocused)
                     }
                 }
                 Spacer(minLength: 0)
@@ -94,9 +96,9 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     }
     
     private func dismissKeyboard() {
-    #if canImport(UIKit)
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    #endif
+        withAnimation(.easeInOut(duration: 0.22)) {
+            isInputFocused = false
+        }
     }
 
     init(
@@ -145,17 +147,13 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                             .accessibilityLabel("Next story")
                     }
                     .frame(width: geo.size.width, height: geo.size.height)
-                } else {
-                    Color.clear
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .allowsHitTesting(false)
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
             .overlay(alignment: .top) {
                 LinearGradient(
-                    colors: [Color.black.opacity(0.65), Color.black.opacity(0.0)],
+                    colors: [Color.black.opacity(0.55), Color.black.opacity(0.0)],
                     startPoint: .top,
                     endPoint: .bottom
                 )
@@ -176,6 +174,7 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
         switch style {
         case let .card(aspectRatio, cornerRadius):
             backgroundBase(contentMode: .fit)
+                .background(Color.clear)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .aspectRatio(aspectRatio, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
@@ -340,9 +339,7 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
         viewModel.pause(false)
         viewModel.advance(to: direction)
     }
-    @State private var avatarFrameGlobal: CGRect? = nil
 
-    // PRZYWRÓCONA, UPROSZCZONA WERSJA
     private var quickReactionsView: some View {
         let columns = [
             GridItem(.flexible(), spacing: 10),
@@ -356,22 +353,18 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                     #if canImport(UIKit)
                     let impact = UIImpactFeedbackGenerator(style: .light)
                     impact.impactOccurred()
+                    dismissKeyboard()
                     #endif
                 } label: {
                     Text(emoji)
                         .font(.system(size: 44))
-                        .frame(maxWidth: .infinity, minHeight: 52)
-                        .background(Color.black.opacity(0.17), in: Circle())
                 }
                 .buttonStyle(.plain)
-                .frame(height: 62)
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, 26)
+        .padding(.horizontal, 60)
     }
-
-    // MARK: - Bottom Bar
 
     private var bottomBar: some View {
         StoryBottomBarView(
@@ -394,8 +387,8 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                 let trimmed = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { return }
                 onSend?(viewModel.currentItem, trimmed)
-                messageText = ""
                 withAnimation(.easeInOut(duration: 0.22)) {
+                    messageText = ""
                     isInputFocused = false
                 }
                 dismissKeyboard()
@@ -414,41 +407,6 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
         .padding(.bottom, 8)
     }
 }
-
-// MARK: - EmojiFlyAnimationView
-
-private struct EmojiFlyAnimationView: View {
-    let emoji: String
-    let from: CGRect
-    let to: CGRect
-    let progress: CGFloat
-
-    var currentPosition: CGPoint {
-        CGPoint(
-            x: from.origin.x + (to.midX - from.midX) * progress,
-            y: from.origin.y + (to.midY - from.midY) * progress - 36 * progress // lekki łuk w górę
-        )
-    }
-
-    var currentScale: CGFloat {
-        1 + (0.8 - 1) * progress
-    }
-
-    var opacity: Double {
-        Double(1 - progress * 0.30)
-    }
-
-    var body: some View {
-        Text(emoji)
-            .font(.system(size: 44))
-            .scaleEffect(currentScale)
-            .opacity(opacity)
-            .position(currentPosition)
-            .animation(nil, value: progress) // pozycja kontrolowana przez binding
-    }
-}
-
-// MARK: - AvatarFramePreferenceKey
 
 private struct AvatarFramePreferenceKey: PreferenceKey {
     static var defaultValue: CGRect? = nil
