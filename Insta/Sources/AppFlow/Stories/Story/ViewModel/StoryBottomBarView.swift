@@ -18,6 +18,8 @@ struct StoryBottomBarView: View {
 
     @FocusState private var isFocused: Bool
     @State private var heartScale: CGFloat = 1.0
+    @State private var heartOffsetY: CGFloat = 0
+    @State private var animatingLike: Bool = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -56,21 +58,30 @@ struct StoryBottomBarView: View {
 
             if !isFocused {
                 Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
-                        isLiked.toggle()
-                        heartScale = 1.3
+                    animatingLike = true
+                    withAnimation(.interpolatingSpring(stiffness: 250, damping: 6)) {
+                        heartScale = 1.4
+                        heartOffsetY = -24
                     }
-                    onLike()
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.6).delay(0.05)) {
-                        heartScale = 1.0
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                        isLiked.toggle()
+                        onLike()
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.5)) {
+                            heartScale = 1.0
+                            heartOffsetY = 0
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                            animatingLike = false
+                        }
                     }
                 } label: {
-                    Image(systemName: isLiked ? "heart.fill" : "heart")
-                        .foregroundColor(isLiked ? .red : .white)
+                    Image(systemName: isLiked || animatingLike ? "heart.fill" : "heart")
+                        .foregroundColor(isLiked || animatingLike ? .red : .white)
                         .font(.system(size: 20, weight: .semibold))
                         .padding(10)
                         .background(Color.black.opacity(0.35), in: Circle())
                         .scaleEffect(heartScale)
+                        .offset(y: heartOffsetY)
                 }
                 .accessibilityLabel(isLiked ? "Unlike" : "Like")
                 .transition(.move(edge: .trailing).combined(with: .opacity))

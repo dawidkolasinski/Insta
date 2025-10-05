@@ -65,7 +65,10 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
                             topOverlayHeight: containerViewModel.config.topOverlayHeight,
                             overrideTopSafeAreaInset: topSafeAreaInset,
                             gestures: containerViewModel.config.gestures,
-                            persistence: persistence
+                            persistence: persistence,
+                            onLike: { item, liked in
+                                persistence.toggleLike(item.id)
+                            }
                         )
                         .offset(x: horizontalDrag - effectiveWidth)
                         .opacity(showNeighbors ? 1 : 0)
@@ -82,7 +85,10 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
                             topOverlayHeight: containerViewModel.config.topOverlayHeight,
                             overrideTopSafeAreaInset: topSafeAreaInset,
                             gestures: containerViewModel.config.gestures,
-                            persistence: persistence
+                            persistence: persistence,
+                            onLike: { item, liked in
+                                persistence.toggleLike(item.id)
+                            }
                         )
                         .offset(x: horizontalDrag + effectiveWidth)
                         .opacity(showNeighbors ? 1 : 0)
@@ -98,7 +104,10 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
                         topOverlayHeight: containerViewModel.config.topOverlayHeight,
                         overrideTopSafeAreaInset: topSafeAreaInset,
                         gestures: containerViewModel.config.gestures,
-                        persistence: persistence
+                        persistence: persistence,
+                        onLike: { item, liked in
+                            persistence.toggleLike(item.id)
+                        }
                     )
                     .offset(x: horizontalDrag)
                     .zIndex(1)
@@ -429,3 +438,4 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
             }
     }
 }
+

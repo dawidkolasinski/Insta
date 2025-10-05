@@ -21,6 +21,8 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     @State private var messageText: String = ""
     @State private var avatarFrameGlobal: CGRect? = nil
 
+    @State private var showActionSheet: Bool = false
+
     private let persistence: PersistenceStore
 
     let onDismiss: (() -> Void)?
@@ -44,6 +46,7 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     var body: some View {
         ZStack {
             contentContainer
+
             interfaceOverlay
                 .opacity(isHolding ? 0 : 1)
                 .animation(.easeInOut(duration: 0.22), value: isHolding)
@@ -62,6 +65,38 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
             }
         }
         .ignoresSafeArea(.keyboard)
+        .overlay(alignment: .bottom) {
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                ZStack {
+                    if isInputFocused && messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        quickReactionsView
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .zIndex(2)
+                    }
+                }
+                Spacer(minLength: 0)
+                bottomBar
+                    .opacity(isHolding ? 0 : 1)
+                    .animation(.easeInOut(duration: 0.22), value: isHolding) // <--- animated!
+            }
+        }
+        .confirmationDialog(
+            "",
+            isPresented: $showActionSheet,
+            titleVisibility: .visible
+        ) {
+            Button("Report", role: .destructive) {
+                // Implement reporting logic here
+            }
+            Button("Mute", role: .none) {
+                // Implement mute logic here
+            }
+            Button("Unfollow", role: .none) {
+                // Implement unfollow logic here
+            }
+            Button("Cancel", role: .cancel) {}
+        }
         .onChange(of: scenePhase) { phase in
             switch phase {
             case .active: viewModel.pause(false)
@@ -90,6 +125,7 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
         }
     }
 
+    // interfaceOverlay: tylko topBar, gradient, gestures – BEZ bottomBar i quickReactionsView!
     private var interfaceOverlay: some View {
         GeometryReader { geo in
             let topInset = isFullscreenIgnoringSafeAreas ? (overrideTopSafeAreaInset ?? UIWindow.topSafeAreaInset) : 0
@@ -128,20 +164,6 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                     Spacer(minLength: 0)
                 }
                 .frame(maxHeight: .infinity, alignment: .top)
-
-                VStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    ZStack {
-                        if isInputFocused && messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            quickReactionsView
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
-                                .zIndex(2)
-                        }
-                    }
-                    Spacer(minLength: 0)
-                    bottomBar
-                }
-                .frame(maxHeight: .infinity, alignment: .bottom)
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
@@ -178,6 +200,7 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
         self.onSend = onSend
         self.onReaction = onReaction
     }
+
     private var contentContainer: some View {
         GeometryReader { geo in
             backgroundStyled
@@ -286,6 +309,18 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.9))
                 Spacer()
+
+                Button(action: {
+                    showActionSheet = true
+                }) {
+                    Image(systemName: "ellipsis")
+                        .rotationEffect(.degrees(0))
+                        .foregroundColor(.white)
+                        .font(.system(size: 24, weight: .bold))
+                        .padding(8)
+                }
+                .accessibilityLabel("More options")
+
                 Button(action: { onDismiss?() }) {
                     Image(systemName: "xmark")
                         .font(.system(size: 24, weight: .regular))
@@ -411,7 +446,6 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                 dismissKeyboard()
             },
             onLike: {
-                persistence.toggleLike(viewModel.currentItem.id)
                 onLike?(viewModel.currentItem, persistence.isLiked(viewModel.currentItem.id))
             },
             onReaction: { emoji in
@@ -444,3 +478,4 @@ private struct HoldGestureModifier<G: Gesture>: ViewModifier {
         }
     }
 }
+
