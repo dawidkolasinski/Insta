@@ -12,15 +12,33 @@ struct StoryAvatarView: View {
     let seen: Bool
     let displayedPlace: AvatarDisplayedPlace
 
+    @ObservedObject private var cache = AvatarImageCache.shared
+
     var body: some View {
-        AsyncImage(url: url) { phase in
-            switch phase {
-            case .success(let img): img.resizable().scaledToFill()
-            case .failure: Color.gray.opacity(0.2)
-            default: ProgressView()
+        Group {
+            if let cached = cache.image(for: url) {
+                cached
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img):
+                        img.resizable().scaledToFill()
+                            .onAppear {
+                                Task { @MainActor in
+                                    cache.store(img, for: url)
+                                }
+                            }
+                    case .failure:
+                        Color.gray.opacity(0.2)
+                    default:
+                        ProgressView()
+                    }
+                }
             }
         }
-        .equalWidthAndHeight(displayedPlace.avatarWidth)
+        .frame(width: displayedPlace.avatarWidth, height: displayedPlace.avatarWidth)
         .clipShape(Circle())
         .padding(displayedPlace.strokeWidth != nil ? 8 : 0)
         .overlay {
@@ -38,6 +56,9 @@ struct StoryAvatarView: View {
             }
         }
         .accessibilityLabel(seen ? "Story seen" : "Story unseen")
+        .onAppear {
+            cache.prefetch(url: url)
+        }
     }
 }
 
@@ -70,4 +91,3 @@ extension AvatarDisplayedPlace {
         }
     }
 }
-

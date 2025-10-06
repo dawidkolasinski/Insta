@@ -50,10 +50,33 @@ final class HomeViewModel: HomeViewModelProtocol {
                 self?.refreshSeen()
             }
             .store(in: &bag)
+        
+        Task { [weak self] in
+            await self?.loadInitialSyncAvatars()
+        }
     }
 
     deinit {
         monitor.cancel()
+    }
+
+    func loadInitialSyncAvatars() async {
+        guard stories.isEmpty else { return }
+        guard isOnline else { return }
+        if let pageStories = try? await repo.loadPage(0) {
+            await withTaskGroup(of: Void.self) { group in
+                for story in pageStories {
+                    group.addTask {
+                        await AvatarImageCache.shared.prefetchSync(url: story.user.avatarURL)
+                    }
+                }
+            }
+            let newVMs = pageStories.map { StoryItemViewModel(story: $0, persistence: persistenceObj) }
+            await MainActor.run {
+                self.stories.append(contentsOf: newVMs)
+                self.page = 1
+            }
+        }
     }
 
     func loadInitial() async {
@@ -74,25 +97,44 @@ final class HomeViewModel: HomeViewModelProtocol {
     private func loadMore() async {
         guard isOnline else { return }
         if let pageStories = try? await repo.loadPage(page) {
+            await withTaskGroup(of: Void.self) { group in
+                for story in pageStories {
+                    group.addTask {
+                        await AvatarImageCache.shared.prefetchSync(url: story.user.avatarURL)
+                    }
+                }
+            }
             let newVMs = pageStories.map { StoryItemViewModel(story: $0, persistence: persistenceObj) }
-            stories.append(contentsOf: newVMs)
-            page += 1
+            await MainActor.run {
+                self.stories.append(contentsOf: newVMs)
+                self.page += 1
+            }
         }
     }
 
     func refreshSeen() {
-        // Recreate VMs so they read latest seen state from persistence
         stories = stories.map { StoryItemViewModel(story: $0.story, persistence: persistenceObj) }
     }
 
     @MainActor
     private func reloadAfterReconnect() async {
-        // Reset pagination and fetch first page to refresh content
         page = 0
         if let firstPage = try? await repo.loadPage(0) {
+            await withTaskGroup(of: Void.self) { group in
+                for story in firstPage {
+                    group.addTask {
+                        await AvatarImageCache.shared.prefetchSync(url: story.user.avatarURL)
+                    }
+                }
+            }
             stories = firstPage.map { StoryItemViewModel(story: $0, persistence: persistenceObj) }
             page = 1
         }
     }
-}
 
+    func preloadAvatars(for users: [User]) {
+        for user in users {
+            AvatarImageCache.shared.loadFromDiskIfNeeded(for: user.avatarURL)
+        }
+    }
+}

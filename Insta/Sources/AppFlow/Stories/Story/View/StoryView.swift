@@ -17,10 +17,7 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     @ObservedObject private var viewModel: ViewModel
     @FocusState private var isInputFocused: Bool
     @State private var isHolding: Bool = false
-    @State private var holdWorkItem: DispatchWorkItem?
     @State private var messageText: String = ""
-    @State private var avatarFrameGlobal: CGRect? = nil
-
     @State private var showActionSheet: Bool = false
 
     private let persistence: PersistenceStore
@@ -44,14 +41,62 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     }
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             contentContainer
 
-            interfaceOverlay
-                .opacity(isHolding ? 0 : 1)
-                .animation(.easeInOut(duration: 0.22), value: isHolding)
+            VStack(spacing: 0) {
+                LinearGradient(
+                    colors: [Color.black.opacity(0.55), Color.black.opacity(0.0)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 80 + (overrideTopSafeAreaInset ?? 0))
+                .allowsHitTesting(false)
+                .padding(.top, -(overrideTopSafeAreaInset ?? 0))
+                .overlay(alignment: .top) {
+                    topBarContent
+                        .padding(.top, 12)
+                }
+                Spacer(minLength: 0)
+            }
+            .opacity(isHolding ? 0 : 1)
+            .animation(.easeInOut(duration: 0.22), value: isHolding)
+
+            if gestures.taps {
+                HStack(spacing: 0) {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .highPriorityGesture(
+                            TapGesture().onEnded { handleTap(direction: .previous) }
+                        )
+                        .accessibilityLabel("Previous story")
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .highPriorityGesture(
+                            TapGesture().onEnded { handleTap(direction: .next) }
+                        )
+                        .accessibilityLabel("Next story")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
-        .modifier(HoldGestureModifier(enabled: gestures.longPressPause, holdGesture: holdGesture))
+        .modifier(HoldGestureModifier(
+            enabled: gestures.longPressPause,
+            minHoldDuration: holdConfig.minDuration,
+            cancelDistance: holdConfig.cancelDistance,
+            onPressDown: {
+                viewModel.pause(true)
+            },
+            onHoldStarted: {
+                isHolding = true
+                viewModel.hold(true)
+            },
+            onTouchEnded: {
+                isHolding = false
+                viewModel.hold(false)
+                viewModel.pause(false)
+            }
+        ))
         .overlay {
             if isInputFocused {
                 Color.black.opacity(0.5)
@@ -78,7 +123,7 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                 Spacer(minLength: 0)
                 bottomBar
                     .opacity(isHolding ? 0 : 1)
-                    .animation(.easeInOut(duration: 0.22), value: isHolding) // <--- animated!
+                    .animation(.easeInOut(duration: 0.22), value: isHolding)
             }
         }
         .confirmationDialog(
@@ -86,15 +131,9 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
             isPresented: $showActionSheet,
             titleVisibility: .visible
         ) {
-            Button("Report", role: .destructive) {
-                // Implement reporting logic here
-            }
-            Button("Mute", role: .none) {
-                // Implement mute logic here
-            }
-            Button("Unfollow", role: .none) {
-                // Implement unfollow logic here
-            }
+            Button("Report", role: .destructive) {}
+            Button("Mute", role: .none) {}
+            Button("Unfollow", role: .none) {}
             Button("Cancel", role: .cancel) {}
         }
         .onChange(of: scenePhase) { phase in
@@ -115,57 +154,9 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
             }
         }
         .onDisappear {
-            holdWorkItem?.cancel()
-            holdWorkItem = nil
-            if isHolding {
-                isHolding = false
-                viewModel.hold(false)
-                viewModel.pause(false)
-            }
-        }
-    }
-
-    // interfaceOverlay: tylko topBar, gradient, gestures – BEZ bottomBar i quickReactionsView!
-    private var interfaceOverlay: some View {
-        GeometryReader { geo in
-            let topInset = isFullscreenIgnoringSafeAreas ? (overrideTopSafeAreaInset ?? UIWindow.topSafeAreaInset) : 0
-            ZStack {
-                if gestures.taps {
-                    HStack(spacing: 0) {
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .highPriorityGesture(
-                                TapGesture().onEnded { handleTap(direction: .previous) }
-                            )
-                            .accessibilityLabel("Previous story")
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .highPriorityGesture(
-                                TapGesture().onEnded { handleTap(direction: .next) }
-                            )
-                            .accessibilityLabel("Next story")
-                    }
-                    .frame(width: geo.size.width, height: geo.size.height)
-                }
-
-                VStack(spacing: 0) {
-                    LinearGradient(
-                        colors: [Color.black.opacity(0.55), Color.black.opacity(0.0)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: topOverlayHeight + topInset + 10)
-                    .allowsHitTesting(false)
-                    .ignoresSafeArea(edges: .top)
-                    .overlay(alignment: .top) {
-                        topBarContent
-                            .padding(.top, topInset + 12)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .frame(maxHeight: .infinity, alignment: .top)
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
+            isHolding = false
+            viewModel.hold(false)
+            viewModel.pause(false)
         }
     }
 
@@ -290,12 +281,6 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
             HStack(spacing: 12) {
                 if let avatar = viewModel.story.user.avatarURL {
                     StoryAvatarView(url: avatar, seen: false, displayedPlace: .storyDetail)
-                        .background(
-                            GeometryReader { geo in
-                                Color.clear
-                                    .preference(key: AvatarFramePreferenceKey.self, value: geo.frame(in: .global))
-                            }
-                        )
                 } else {
                     Image(systemName: "person.crop.circle.fill")
                         .foregroundStyle(.white)
@@ -309,7 +294,6 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.9))
                 Spacer()
-
                 Button(action: {
                     showActionSheet = true
                 }) {
@@ -320,8 +304,11 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                         .padding(8)
                 }
                 .accessibilityLabel("More options")
-
-                Button(action: { onDismiss?() }) {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        onDismiss?()
+                    }
+                }) {
                     Image(systemName: "xmark")
                         .font(.system(size: 24, weight: .regular))
                         .foregroundColor(.white)
@@ -331,59 +318,12 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
             }
             .padding(.horizontal)
         }
-        .onPreferenceChange(AvatarFramePreferenceKey.self) { value in
-            self.avatarFrameGlobal = value
-        }
     }
 
     private func filledAmount(for barIndex: Int) -> CGFloat {
         if barIndex < viewModel.index { return 1 }
         if barIndex > viewModel.index { return 0 }
         return CGFloat(min(1, max(0, viewModel.progress)))
-    }
-
-    private var holdGesture: some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .local)
-            .onChanged { value in
-                if holdWorkItem == nil { scheduleHold() }
-                let dx = value.translation.width
-                let dy = value.translation.height
-                if (dx * dx + dy * dy) > (holdConfig.cancelDistance * holdConfig.cancelDistance) {
-                    cancelHold()
-                }
-            }
-            .onEnded { _ in finishHold() }
-    }
-
-    private func scheduleHold() {
-        cancelHold()
-        let work = DispatchWorkItem {
-            isHolding = true
-            viewModel.hold(true)
-            viewModel.pause(true)
-        }
-        holdWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + holdConfig.minDuration, execute: work)
-    }
-
-    private func cancelHold() {
-        holdWorkItem?.cancel()
-        holdWorkItem = nil
-        if isHolding {
-            isHolding = false
-            viewModel.hold(false)
-            viewModel.pause(false)
-        }
-    }
-
-    private func finishHold() {
-        holdWorkItem?.cancel()
-        holdWorkItem = nil
-        if isHolding {
-            isHolding = false
-            viewModel.hold(false)
-            viewModel.pause(false)
-        }
     }
 
     private func handleTap(direction: StoryAdvanceDirection) {
@@ -459,22 +399,58 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
     }
 }
 
-private struct AvatarFramePreferenceKey: PreferenceKey {
-    static var defaultValue: CGRect? = nil
-    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) {
-        value = nextValue() ?? value
-    }
-}
-
-private struct HoldGestureModifier<G: Gesture>: ViewModifier {
+private struct HoldGestureModifier: ViewModifier {
     let enabled: Bool
-    let holdGesture: G
+    let minHoldDuration: Double
+    let cancelDistance: CGFloat
+    let onPressDown: () -> Void
+    let onHoldStarted: () -> Void
+    let onTouchEnded: () -> Void
+
+    @State private var isHolding = false
+    @State private var dragExceeded = false
+    @State private var hasPressDown = false
 
     func body(content: Content) -> some View {
-        if enabled {
-            content.simultaneousGesture(holdGesture)
+        if !enabled {
+            content
         } else {
             content
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            if !hasPressDown {
+                                hasPressDown = true
+                                onPressDown()
+                            }
+                            let dx = value.translation.width
+                            let dy = value.translation.height
+                            if (dx * dx + dy * dy) > (cancelDistance * cancelDistance) {
+                                if isHolding {
+                                    onTouchEnded()
+                                    isHolding = false
+                                }
+                                dragExceeded = true
+                            }
+                        }
+                        .onEnded { _ in
+                            if isHolding || hasPressDown {
+                                onTouchEnded()
+                                isHolding = false
+                                hasPressDown = false
+                            }
+                            dragExceeded = false
+                        }
+                )
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: minHoldDuration)
+                        .onEnded { success in
+                            if success && !dragExceeded {
+                                isHolding = true
+                                onHoldStarted()
+                            }
+                        }
+                )
         }
     }
 }
