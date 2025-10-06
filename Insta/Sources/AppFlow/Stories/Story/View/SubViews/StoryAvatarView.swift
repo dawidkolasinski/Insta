@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct StoryAvatarView: View {
-    let url: URL
+    let url: URL?
     let seen: Bool
     let displayedPlace: AvatarDisplayedPlace
 
@@ -16,11 +16,11 @@ struct StoryAvatarView: View {
 
     var body: some View {
         Group {
-            if let cached = cache.image(for: url) {
+            if let url, let cached = cache.image(for: url) {
                 cached
                     .resizable()
                     .scaledToFill()
-            } else {
+            } else if let url {
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let img):
@@ -36,6 +36,16 @@ struct StoryAvatarView: View {
                         ProgressView()
                     }
                 }
+            } else {
+                // Brak URL: placeholder
+                Color.gray.opacity(0.2)
+                    .overlay(
+                        Image(systemName: "person.fill")
+                            .resizable()
+                            .scaledToFit()
+                            .foregroundStyle(.secondary)
+                            .padding(8)
+                    )
             }
         }
         .frame(width: displayedPlace.avatarWidth, height: displayedPlace.avatarWidth)
@@ -57,7 +67,7 @@ struct StoryAvatarView: View {
         }
         .accessibilityLabel(seen ? "Story seen" : "Story unseen")
         .onAppear {
-            cache.prefetch(url: url)
+            if let url { cache.prefetch(url: url) }
         }
     }
 }

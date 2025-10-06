@@ -9,7 +9,7 @@ import Foundation
 
 struct StoryAutoAdvanceConfig: Equatable {
     var enabled: Bool = true
-    var durationPerSlide: TimeInterval = 5.0
+    var durationPerSlide: TimeInterval = 3.0
     var tick: TimeInterval = 0.05
     var loops: Bool = false
 }

@@ -18,7 +18,7 @@ extension StoriesFeedAdapter {
             AnyStory(
                 id: vm.story.id,
                 user: AnyStoryUser(name: vm.story.user.name, avatarURL: vm.story.user.avatarURL),
-                items: vm.story.items.map { AnyStoryItem(id: $0.id, imageURL: $0.imageURL) }
+                items: vm.story.items.map { AnyStoryItem(id: $0.id, imageURL: $0.imageURL, postedAt: $0.postedAt) }
             )
         }
         let safeIndex = min(max(0, startIndex), max(0, mapped.count - 1))

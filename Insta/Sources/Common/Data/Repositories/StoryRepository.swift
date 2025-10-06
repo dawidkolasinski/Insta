@@ -10,7 +10,6 @@ import Foundation
 final class StoryRepository {
     private let usersSource = UsersSource()
     private var userPages: [[User]] = []
-    private let itemsPerStory = Int.random(in: 1...4)
 
     init() {
         if let pages = try? usersSource.loadAllUsers() {
@@ -27,16 +26,22 @@ final class StoryRepository {
 
         return users.enumerated().map { (idx, user) in
             let storyID = "story-\(page)-\(user.id)"
+            let itemsCount = Int.random(in: 1...10)
 
-            let itemsCount = Int.random(in: 1...4)
+            var offsets: [Int] = (0..<itemsCount).map { _ in Int.random(in: 1_800...14_400) }
+            for i in 1..<offsets.count {
+                offsets[i] += offsets[i-1]
+            }
+            offsets = offsets.reversed()
+
             let items: [StoryItem] = (0..<itemsCount).map { i in
                 let seed = "\(user.id)-\(page)-\(i)"
                 let imageURL = URL(string: "https://picsum.photos/seed/\(seed)/1080/1920")!
-
+                let itemDate = now.addingTimeInterval(-TimeInterval(offsets[i]))
                 return StoryItem(
                     id: "item-\(page)-\(user.id)-\(i)",
                     imageURL: imageURL,
-                    postedAt: now.addingTimeInterval(TimeInterval(-(idx * itemsCount + i) * 3600))
+                    postedAt: itemDate
                 )
             }
 

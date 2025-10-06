@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct StoryItem: Identifiable, Hashable, Codable {
+struct StoryItem: Identifiable, Hashable, Codable, StoryItemProtocol {
     let id: String                // np. "item-<page>-<userId>-<i>"
     let imageURL: URL             // zdalny obraz (picsum z seedem)
     let postedAt: Date            // metadata do sortowania/paska progresu

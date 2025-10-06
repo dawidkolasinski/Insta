@@ -7,7 +7,7 @@
 
 import Foundation
 
-protocol StoryUserProtocol {
+protocol StoryUserProtocol: Codable {
     var name: String { get }
     var avatarURL: URL? { get }
 }

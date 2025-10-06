@@ -7,8 +7,8 @@
 
 import Foundation
 
-struct User: Identifiable, Hashable, Codable {
+struct User: Identifiable, Hashable, Codable, StoryUserProtocol {
     let id: Int
     let name: String
-    let avatarURL: URL
+    var avatarURL: URL?
 }

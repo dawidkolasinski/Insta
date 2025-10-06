@@ -11,4 +11,5 @@ protocol StoryProtocol {
     var id: String { get }
     var user: StoryUserProtocol { get }
     var items: [StoryItemProtocol] { get }
+    var postedAt: Date { get }
 }

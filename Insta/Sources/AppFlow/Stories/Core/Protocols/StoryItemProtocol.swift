@@ -7,7 +7,8 @@
 
 import Foundation
 
-protocol StoryItemProtocol {
+protocol StoryItemProtocol: Codable {
     var id: String { get }
-    var imageURL: URL? { get }
+    var imageURL: URL { get }
+    var postedAt: Date { get }
 }

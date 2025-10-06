@@ -29,7 +29,7 @@ final class StoryViewModel: StoryViewModelProtocol {
     var currentItem: StoryItemProtocol {
         items[safe: index]
         ?? items.first
-        ?? AnyStoryItem(id: "empty", imageURL: nil)
+        ?? AnyStoryItem(id: "empty", imageURL: URL(string: "about:blank")!, postedAt: Date())
     }
 
     init(story: StoryProtocol, auto: StoryAutoAdvanceConfig = .init()) {
@@ -182,7 +182,7 @@ final class StoryViewModel: StoryViewModelProtocol {
     private func prefetch(item: StoryItemProtocol) {
         let id = item.id
         guard imageCache[id] == nil else { return }
-        guard let url = item.imageURL else { return }
+        let url = item.imageURL
 
         // Make guard/insert atomic and main-actor isolated
         Task { @MainActor in

@@ -66,8 +66,10 @@ final class HomeViewModel: HomeViewModelProtocol {
         if let pageStories = try? await repo.loadPage(0) {
             await withTaskGroup(of: Void.self) { group in
                 for story in pageStories {
-                    group.addTask {
-                        await AvatarImageCache.shared.prefetchSync(url: story.user.avatarURL)
+                    if let url = story.user.avatarURL {
+                        group.addTask {
+                            await AvatarImageCache.shared.prefetchSync(url: url)
+                        }
                     }
                 }
             }
@@ -99,8 +101,10 @@ final class HomeViewModel: HomeViewModelProtocol {
         if let pageStories = try? await repo.loadPage(page) {
             await withTaskGroup(of: Void.self) { group in
                 for story in pageStories {
-                    group.addTask {
-                        await AvatarImageCache.shared.prefetchSync(url: story.user.avatarURL)
+                    if let url = story.user.avatarURL {
+                        group.addTask {
+                            await AvatarImageCache.shared.prefetchSync(url: url)
+                        }
                     }
                 }
             }
@@ -122,8 +126,10 @@ final class HomeViewModel: HomeViewModelProtocol {
         if let firstPage = try? await repo.loadPage(0) {
             await withTaskGroup(of: Void.self) { group in
                 for story in firstPage {
-                    group.addTask {
-                        await AvatarImageCache.shared.prefetchSync(url: story.user.avatarURL)
+                    if let url = story.user.avatarURL {
+                        group.addTask {
+                            await AvatarImageCache.shared.prefetchSync(url: url)
+                        }
                     }
                 }
             }
@@ -134,7 +140,9 @@ final class HomeViewModel: HomeViewModelProtocol {
 
     func preloadAvatars(for users: [User]) {
         for user in users {
-            AvatarImageCache.shared.loadFromDiskIfNeeded(for: user.avatarURL)
+            if let url = user.avatarURL {
+                AvatarImageCache.shared.loadFromDiskIfNeeded(for: url)
+            }
         }
     }
 }
