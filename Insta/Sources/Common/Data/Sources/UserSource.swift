@@ -16,7 +16,6 @@ struct UsersSource {
         let profile_picture_url: URL
     }
 
-    /// Zwraca użytkowników pogrupowanych jak w JSON: [pageIndex: [User]]
     func loadAllUsers() throws -> [[User]] {
         let url = try bundleURL(named: "users", ext: "json")
         let data = try Data(contentsOf: url)

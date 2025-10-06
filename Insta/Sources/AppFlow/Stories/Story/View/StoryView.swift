@@ -80,7 +80,7 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .modifier(HoldGestureModifier(
+        .holdGesture(
             enabled: gestures.longPressPause,
             minHoldDuration: holdConfig.minDuration,
             cancelDistance: holdConfig.cancelDistance,
@@ -96,7 +96,7 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                 viewModel.hold(false)
                 viewModel.pause(false)
             }
-        ))
+        )
         .overlay {
             if isInputFocused {
                 Color.black.opacity(0.5)
@@ -396,93 +396,5 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
         .padding(.horizontal, 12)
         .padding(.top, 8)
         .padding(.bottom, 8)
-    }
-}
-
-private struct HoldGestureModifier: ViewModifier {
-    let enabled: Bool
-    let minHoldDuration: Double
-    let cancelDistance: CGFloat
-    let onPressDown: () -> Void
-    let onHoldStarted: () -> Void
-    let onTouchEnded: () -> Void
-
-    @State private var isHolding = false
-    @State private var dragExceeded = false
-    @State private var hasPressDown = false
-
-    func body(content: Content) -> some View {
-        if !enabled {
-            content
-        } else {
-            content
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            if !hasPressDown {
-                                hasPressDown = true
-                                onPressDown()
-                            }
-                            let dx = value.translation.width
-                            let dy = value.translation.height
-                            if (dx * dx + dy * dy) > (cancelDistance * cancelDistance) {
-                                if isHolding {
-                                    onTouchEnded()
-                                    isHolding = false
-                                }
-                                dragExceeded = true
-                            }
-                        }
-                        .onEnded { _ in
-                            if isHolding || hasPressDown {
-                                onTouchEnded()
-                                isHolding = false
-                                hasPressDown = false
-                            }
-                            dragExceeded = false
-                        }
-                )
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: minHoldDuration)
-                        .onEnded { success in
-                            if success && !dragExceeded {
-                                isHolding = true
-                                onHoldStarted()
-                            }
-                        }
-                )
-        }
-    }
-}
-
-// MARK: - Date "time ago" formatting
-
-private extension Date {
-    func timeAgoShort() -> String {
-        let now = Date()
-        let seconds = max(0, Int(now.timeIntervalSince(self)))
-        let minute = 60
-        let hour = 60 * minute
-        let day = 24 * hour
-        let week = 7 * day
-
-        func safeDiv(_ a: Int, _ b: Int) -> Int {
-            b > 0 ? a / b : 0
-        }
-
-        switch seconds {
-        case ..<minute:
-            return "\(seconds)s"
-        case minute..<(hour):
-            return "\(safeDiv(seconds, minute))m"
-        case hour..<(day):
-            return "\(safeDiv(seconds, hour))h"
-        case day..<(week):
-            return "\(safeDiv(seconds, day))d"
-        default:
-            let formatter = DateFormatter()
-            formatter.dateFormat = "d.MM"
-            return formatter.string(from: self)
-        }
     }
 }

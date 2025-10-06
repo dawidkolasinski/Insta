@@ -116,8 +116,6 @@ final class StoriesContainerViewModel: StoriesContainerViewModelProtocol {
     }
 }
 
-// MARK: - StoryViewModel Delegation Helpers
-
 private extension StoryViewModel {
     func becomeCurrentStory() {
         pause(false)

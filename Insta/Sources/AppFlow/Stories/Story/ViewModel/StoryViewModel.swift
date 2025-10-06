@@ -41,7 +41,6 @@ final class StoryViewModel: StoryViewModelProtocol {
         self.requestPrevStory = false
         self.isCurrentItemLoaded = false
 
-        // Prefetch bieżącego i sąsiadów na start.
         preloadAround(index: self.index)
     }
 
@@ -61,12 +60,10 @@ final class StoryViewModel: StoryViewModelProtocol {
         self.requestPrevStory = false
         self.isCurrentItemLoaded = false
 
-        // Prefetch po załadowaniu nowej historii.
         preloadAround(index: self.index)
     }
 
     func start() {
-        // Timer startuje tylko gdy bieżący item jest załadowany.
         stop()
         progress = 0
         guard autoAdvanceConfig.enabled, !items.isEmpty, isCurrentItemLoaded else { return }
@@ -146,11 +143,8 @@ final class StoryViewModel: StoryViewModelProtocol {
     }
 
     func onCurrentItemLoaded() {
-        // Ustawiamy flagę dopiero po realnym załadowaniu obrazka (z cache lub sukces AsyncImage).
         isCurrentItemLoaded = true
-        // Timer startuje dopiero teraz, jeśli nie istnieje.
         if timerRef == nil { start() }
-        // Prefetch na wszelki wypadek.
         preloadAround(index: index)
     }
 
@@ -164,8 +158,6 @@ final class StoryViewModel: StoryViewModelProtocol {
     func clearDidFinish() { didFinish = false }
     func requestPrev() { requestPrevStory = true }
     func clearRequestPrev() { requestPrevStory = false }
-
-    // MARK: - Prefetch
 
     private func preloadAround(index: Int) {
         let candidates: [StoryItemProtocol] = [
@@ -184,12 +176,10 @@ final class StoryViewModel: StoryViewModelProtocol {
         guard imageCache[id] == nil else { return }
         let url = item.imageURL
 
-        // Make guard/insert atomic and main-actor isolated
         Task { @MainActor in
             guard !inFlightPrefetch.contains(id) else { return }
             inFlightPrefetch.insert(id)
 
-            // Start background prefetch task once we've inserted
             Task.detached(priority: .utility) { [weak self] in
                 defer {
                     Task { @MainActor in
@@ -207,7 +197,7 @@ final class StoryViewModel: StoryViewModelProtocol {
                         }
                     }
                 } catch {
-                    // Ignorujemy błędy – nie oznaczamy loaded, timer nie wystartuje "na niby".
+                    print("StoryViewModel error: \(error)")
                 }
             }
         }

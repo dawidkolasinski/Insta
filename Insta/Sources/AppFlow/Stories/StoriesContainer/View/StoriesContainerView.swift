@@ -438,4 +438,3 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
             }
     }
 }
-

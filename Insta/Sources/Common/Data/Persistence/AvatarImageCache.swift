@@ -26,7 +26,6 @@ final class AvatarImageCache: ObservableObject {
         cache[url]
     }
 
-        /// Asynchronicznie doczytuje z dysku (jeśli nie ma w RAM) i wrzuca do cache
     func loadFromDiskIfNeeded(for url: URL) {
         guard cache[url] == nil else { return }
         let fileURL = self.fileURL(for: url)

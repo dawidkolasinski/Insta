@@ -35,8 +35,6 @@ struct StoriesPresenterModifier: ViewModifier {
                         Color.black.opacity(max(0, min(1, config.dimmerMaxOpacity * (1 - sqrt(Double(dismissProgress))))))
                             .ignoresSafeArea()
                             .zIndex(1)
-
-                        // Wrapper ignorujący safe area od 1. klatki
                         ZStack {
                             StoriesContainerView(
                                 viewModel: StoriesContainerViewModel(feed: feed, config: config, autoConfig: autoConfig),
@@ -68,11 +66,12 @@ extension View {
         autoConfig: StoryAutoAdvanceConfig = .init(),
         persistence: PersistenceStore = PersistenceStore()
     ) -> some View {
-        modifier(StoriesPresenterModifier(isPresented: isPresented,
-                                          feed: feed,
-                                          dismissProgress: dismissProgress,
-                                          config: config,
-                                          autoConfig: autoConfig,
-                                          persistence: persistence))
+        modifier(
+            StoriesPresenterModifier(isPresented: isPresented,
+                                     feed: feed,
+                                     dismissProgress: dismissProgress,
+                                     config: config,
+                                     autoConfig: autoConfig,
+                                     persistence: persistence))
     }
 }
