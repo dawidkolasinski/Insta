@@ -15,6 +15,10 @@ struct HomeView<ViewModel: HomeViewModelProtocol>: View {
     @State private var navHidden: Bool = false
     @State private var lastOffset: CGFloat = 0
 
+    private var limitedStories: [StoryItemViewModel] {
+        Array(viewModel.stories.prefix(6))
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             NavigationBarView(title: "DK's Insta")
@@ -36,8 +40,8 @@ struct HomeView<ViewModel: HomeViewModelProtocol>: View {
                 .zIndex(2)
             }
 
-            VStack(spacing: 0) {
-                ScrollView(.vertical) {
+            ScrollView(.vertical) {
+                VStack(spacing: 0) {
                     Color.clear.frame(height: 48)
                     StoriesListView(
                         layout: .horizontal,
@@ -56,7 +60,22 @@ struct HomeView<ViewModel: HomeViewModelProtocol>: View {
                         }
                     )
                     .padding(.vertical, 8)
-                    FeedListView()
+                    FeedListView(
+                        items: viewModel.stories,
+                        layout: .vertical,
+                        onSelect: { storyVM in
+                            guard viewModel.isOnline else { return }
+                            if let index = viewModel.stories.firstIndex(where: { $0.story.id == storyVM.story.id }) {
+                                selectedIndex = index
+                                withAnimation(.spring(response: 0.4, dampingFraction: 0.9)) {
+                                    showStories = true
+                                }
+                            }
+                        },
+                        onLoadMore: { current in
+                            Task { await viewModel.loadMoreIfNeeded(current: current) }
+                        }
+                    )
                 }
             }
         }

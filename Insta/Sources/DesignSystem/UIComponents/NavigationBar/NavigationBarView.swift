@@ -16,7 +16,6 @@ struct NavigationBarView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // Trailing text as a menu
             Menu {
                 Button("Opcja 1", action: onMenuPrimary)
                 Button("Opcja 2", action: onMenuSecondary)
@@ -33,7 +32,6 @@ struct NavigationBarView: View {
             }
             .padding(.trailing, 4)
             Spacer(minLength: 0)
-            // Icons (black)
             Button(action: onLeadingTap) {
                 Image(systemName: "heart")
                     .font(.system(size: 18, weight: .semibold))
@@ -41,7 +39,7 @@ struct NavigationBarView: View {
                     .foregroundColor(.black)
             }
             Button(action: onTrailingTap) {
-                Image(systemName: "bubble.right")
+                Image(systemName: "paperplane")
                     .font(.system(size: 18, weight: .semibold))
                     .frame(width: 44, height: 44)
                     .foregroundColor(.black)

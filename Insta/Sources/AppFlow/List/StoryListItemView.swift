@@ -1,10 +1,3 @@
-//
-//  StoryListItemView.swift
-//  Insta
-//
-//  Created by Dawid Kolasinski on 27/09/2025.
-//
-
 import SwiftUI
 
 struct StoryListItemView: View {
@@ -24,11 +17,19 @@ struct StoryListItemView: View {
                         onLoadMore(viewModel)
                     }
             case .horizontal:
-                StoryAvatarView(
-                    url: viewModel.story.user.avatarURL,
-                    seen: viewModel.isSeen,
-                    displayedPlace: .storyFeed
-                )
+                VStack(spacing: 6) {
+                    StoryAvatarView(
+                        url: viewModel.story.user.avatarURL,
+                        seen: viewModel.isSeen,
+                        displayedPlace: .storyFeed
+                    )
+                    Text(viewModel.story.user.name)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(viewModel.isSeen ? .secondary : .primary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
                 .onTapGesture { onSelect(viewModel) }
                 .onAppear { onLoadMore(viewModel) }
             }
@@ -47,4 +48,3 @@ struct StoryListItemView: View {
         self.onLoadMore = onLoadMore
     }
 }
-
