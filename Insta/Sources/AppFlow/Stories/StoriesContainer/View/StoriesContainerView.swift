@@ -59,7 +59,7 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
                     if let previous = containerViewModel.previousStoryViewModel {
                         StoryView(
                             viewModel: previous,
-                            onDismiss: onDismiss,
+                            onDismiss: { performDismissAnimation() },
                             style: containerViewModel.config.style,
                             holdConfig: containerViewModel.config.hold,
                             topOverlayHeight: containerViewModel.config.topOverlayHeight,
@@ -79,7 +79,7 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
                     if let next = containerViewModel.nextStoryViewModel {
                         StoryView(
                             viewModel: next,
-                            onDismiss: onDismiss,
+                            onDismiss: { performDismissAnimation() },
                             style: containerViewModel.config.style,
                             holdConfig: containerViewModel.config.hold,
                             topOverlayHeight: containerViewModel.config.topOverlayHeight,
@@ -98,7 +98,7 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
                     }
                     StoryView(
                         viewModel: containerViewModel.currentStoryViewModel,
-                        onDismiss: onDismiss,
+                        onDismiss: { performDismissAnimation() },
                         style: containerViewModel.config.style,
                         holdConfig: containerViewModel.config.hold,
                         topOverlayHeight: containerViewModel.config.topOverlayHeight,
@@ -438,3 +438,4 @@ struct StoriesContainerView<ViewModel: StoriesContainerViewModelProtocol>: View 
             }
     }
 }
+

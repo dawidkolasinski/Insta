@@ -61,6 +61,7 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
             }
             .opacity(isHolding ? 0 : 1)
             .animation(.easeInOut(duration: 0.22), value: isHolding)
+            .zIndex(1)
 
             if gestures.taps {
                 HStack(spacing: 0) {
@@ -77,7 +78,9 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                         )
                         .accessibilityLabel("Next story")
                 }
+                .padding(.top, topOverlayHeight)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .zIndex(0)
             }
         }
         .holdGesture(
@@ -305,9 +308,7 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
                 }
                 .accessibilityLabel("More options")
                 Button(action: {
-                    withAnimation(.easeInOut(duration: 0.22)) {
-                        onDismiss?()
-                    }
+                    onDismiss?() // Kontener wykona animację
                 }) {
                     Image(systemName: "xmark")
                         .font(.system(size: 24, weight: .regular))
@@ -398,3 +399,4 @@ struct StoryView<ViewModel: StoryViewModelProtocol>: View {
         .padding(.bottom, 8)
     }
 }
+
