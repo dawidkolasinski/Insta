@@ -19,7 +19,6 @@ struct StoryRowView: View {
                     .foregroundColor(.primary)
                 Spacer()
                 Button {
-                    // Akcja follow
                 } label: {
                     Text("Follow")
                         .font(.subheadline.weight(.semibold))
@@ -32,7 +31,6 @@ struct StoryRowView: View {
                         )
                 }
                 Button {
-                    // Akcja menu
                 } label: {
                     Image(systemName: "ellipsis")
                         .foregroundColor(.primary)
@@ -42,13 +40,11 @@ struct StoryRowView: View {
             .padding(.horizontal, 8)
             .padding(.top, 6)
 
-            // Wszystkie zdjęcia w TabView, jeśli są
             if !story.items.isEmpty {
                 GeometryReader { geo in
                     let width = geo.size.width
                     let height = width / imageAspectRatio
                     ZStack {
-                        // Placeholder skeleton - ten sam rozmiar co zdjęcie
                         RoundedRectangle(cornerRadius: imageCornerRadius, style: .continuous)
                             .fill(Color.gray.opacity(0.12))
                             .frame(width: width, height: height)
@@ -68,7 +64,6 @@ struct StoryRowView: View {
                                             .scaledToFill()
                                             .frame(width: width, height: height)
                                             .clipped()
-                                            .cornerRadius(imageCornerRadius)
                                     case .failure:
                                         Image(systemName: "photo")
                                             .resizable()
@@ -82,7 +77,6 @@ struct StoryRowView: View {
                                 }
                                 .frame(width: width, height: height)
                                 .clipped()
-                                .cornerRadius(imageCornerRadius)
                                 .tag(idx)
                             }
                         }
@@ -97,7 +91,6 @@ struct StoryRowView: View {
             }
         }
         .background(Color(.systemBackground))
-        .cornerRadius(12)
         .shadow(color: Color(.black).opacity(0.03), radius: 4, x: 0, y: 2)
         .padding(.vertical, 8)
         .contentShape(Rectangle())

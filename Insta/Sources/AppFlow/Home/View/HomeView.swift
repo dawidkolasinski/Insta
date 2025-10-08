@@ -12,70 +12,69 @@ struct HomeView<ViewModel: HomeViewModelProtocol>: View {
     @State private var selectedIndex: Int? = nil
     @State private var showStories: Bool = false
     @State private var dismissProgress: CGFloat = 0
-    @State private var navHidden: Bool = false
-    @State private var lastOffset: CGFloat = 0
 
-    private var limitedStories: [StoryItemViewModel] {
-        Array(viewModel.stories.prefix(6))
-    }
+    private let headerHeight: CGFloat = 48
+    private let fadeAmount: CGFloat = 0.10
+    private let smoothingDown: CGFloat = 0.28
+    private let smoothingUp: CGFloat = 0.38
 
     var body: some View {
-        ZStack(alignment: .top) {
-            NavigationBarView(title: "DK's Insta")
-                .offset(y: navHidden ? -48 : 0)
-                .animation(.easeInOut(duration: 0.2), value: navHidden)
-                .zIndex(1)
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 0) {
+                StoriesListView(
+                    layout: .horizontal,
+                    items: viewModel.stories,
+                    onSelect: { storyVM in
+                        guard viewModel.isOnline else { return }
+                        if let index = viewModel.stories.firstIndex(where: { $0.story.id == storyVM.story.id }) {
+                            selectedIndex = index
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.9)) {
+                                showStories = true
+                            }
+                        }
+                    },
+                    onLoadMore: { current in
+                        Task { await viewModel.loadMoreIfNeeded(current: current) }
+                    }
+                )
+                .padding(.vertical, 8)
 
-            if !viewModel.isOnline {
-                HStack(spacing: 8) {
-                    Image(systemName: "wifi.exclamationmark")
-                    Text("No internet connection - showing loaded data")
-                }
-                .font(.subheadline)
-                .padding(10)
-                .background(Color.red.opacity(0.9), in: Capsule())
-                .foregroundColor(.white)
-                .padding(.top, 56)
-                .transition(.opacity)
-                .zIndex(2)
+                FeedListView(
+                    items: viewModel.stories,
+                    layout: .vertical,
+                    onSelect: { storyVM in
+                        guard viewModel.isOnline else { return }
+                        if let index = viewModel.stories.firstIndex(where: { $0.story.id == storyVM.story.id }) {
+                            selectedIndex = index
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.9)) {
+                                showStories = true
+                            }
+                        }
+                    },
+                    onLoadMore: { current in
+                        Task { await viewModel.loadMoreIfNeeded(current: current) }
+                    }
+                )
             }
-
-            ScrollView(.vertical) {
-                VStack(spacing: 0) {
-                    Color.clear.frame(height: 48)
-                    StoriesListView(
-                        layout: .horizontal,
-                        items: viewModel.stories,
-                        onSelect: { storyVM in
-                            guard viewModel.isOnline else { return }
-                            if let index = viewModel.stories.firstIndex(where: { $0.story.id == storyVM.story.id }) {
-                                selectedIndex = index
-                                withAnimation(.spring(response: 0.4, dampingFraction: 0.9)) {
-                                    showStories = true
-                                }
-                            }
-                        },
-                        onLoadMore: { current in
-                            Task { await viewModel.loadMoreIfNeeded(current: current) }
-                        }
-                    )
-                    .padding(.vertical, 8)
-                    FeedListView(
-                        items: viewModel.stories,
-                        layout: .vertical,
-                        onSelect: { storyVM in
-                            guard viewModel.isOnline else { return }
-                            if let index = viewModel.stories.firstIndex(where: { $0.story.id == storyVM.story.id }) {
-                                selectedIndex = index
-                                withAnimation(.spring(response: 0.4, dampingFraction: 0.9)) {
-                                    showStories = true
-                                }
-                            }
-                        },
-                        onLoadMore: { current in
-                            Task { await viewModel.loadMoreIfNeeded(current: current) }
-                        }
-                    )
+        }
+        .collapsibleHeader(
+            height: headerHeight,
+            fadeAmount: fadeAmount,
+            smoothingDown: smoothingDown,
+            smoothingUp: smoothingUp
+        ) { progress in
+            ZStack(alignment: .top) {
+                NavigationBarView(title: "DK's Insta", progress: progress)
+                if !viewModel.isOnline {
+                    HStack(spacing: 8) {
+                        Image(systemName: "wifi.exclamationmark")
+                        Text("No internet connection - showing loaded data")
+                    }
+                    .font(.subheadline)
+                    .padding(10)
+                    .background(Color.red.opacity(0.9), in: Capsule())
+                    .foregroundColor(.white)
+                    .padding(.top, 56)
                 }
             }
         }
